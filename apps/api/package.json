@@ -6,10 +6,11 @@
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "dev:worker": "tsx watch src/workers/enrichment.worker.ts",
+    "dev": "tsx watch --env-file=../../.env src/index.ts",
+    "dev:worker:enrichment": "tsx watch --env-file=../../.env src/workers/enrichment.worker.ts",
+    "dev:worker:catalog": "tsx watch --env-file=../../.env src/workers/catalog-sync.worker.ts",
     "build": "tsc && tsc-alias",
-    "start": "node dist/index.js",
+    "start": "node --env-file=../../.env dist/index.js",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rm -rf dist"
