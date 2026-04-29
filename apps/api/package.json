@@ -18,14 +18,14 @@
   "dependencies": {
     "@cap/db": "workspace:*",
     "@cap/shared": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "bullmq": "^5.7.0",
-    "hono": "^4.5.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "bullmq": "^5.76.4",
+    "hono": "^4.12.15",
     "ioredis": "^5.4.0",
     "openai": "^4.57.0",
     "zod": "^3.23.0",
     "@hono/node-server": "^1.13.0",
-    "@hono/zod-validator": "^0.4.0"
+    "@hono/zod-validator": "^0.7.6"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
