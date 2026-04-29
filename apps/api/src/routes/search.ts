@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { prisma } from '@cap/db'
-import { SearchRequestSchema, type SearchResponse, type CAPError } from '@cap/shared'
+import { SearchRequestSchema, type SearchResponse } from '@cap/shared'
 import { cacheGet, cacheSet } from '../lib/redis.js'
 import OpenAI from 'openai'
 
@@ -11,16 +11,32 @@ const searchRouter = new Hono()
 // POST /v1/search
 searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
   const startTime = Date.now()
+  const auth = c.get('auth')
   const body = c.req.valid('json')
   const { query, filters, limit, sort } = body
 
+  // Detect agent type from User-Agent for analytics
+  const userAgent = c.req.header('User-Agent') ?? ''
+  const agentType = detectAgentType(userAgent)
+  const agentId = c.req.header('X-Agent-ID') ?? auth.apiKeyId
+
   const searchId = `srch_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`
 
-  // Check cache for identical queries
-  const cacheKey = `search:${JSON.stringify({ query, filters, limit, sort })}`
+  // Cache is scoped per-merchant to honor the multi-tenant filter
+  const cacheKey = `search:${auth.merchantId}:${JSON.stringify({ query, filters, limit, sort })}`
   const cached = await cacheGet<SearchResponse>(cacheKey)
   if (cached) {
     cached.latency_ms = Date.now() - startTime
+    cached.search_id = searchId
+    void persistAgentQuery({
+      id: searchId,
+      agentId,
+      agentType,
+      query,
+      filters,
+      results: cached.results.length,
+      latencyMs: cached.latency_ms,
+    })
     return c.json(cached)
   }
 
@@ -31,11 +47,17 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
     dimensions: 1536,
   })
   const queryEmbedding = embeddingResponse.data[0]?.embedding ?? []
+  const embeddingStr = `[${queryEmbedding.join(',')}]`
 
-  // Build SQL filters
+  // Build SQL filters with bound parameters (no string concat for user input)
   const conditions: string[] = ['pe.deleted_at IS NULL']
   const params: (string | number | boolean | string[])[] = []
   let paramIdx = 1
+
+  // Multi-tenant guard: only return products belonging to the calling merchant
+  conditions.push(`pe.merchant_id = $${paramIdx}::uuid`)
+  params.push(auth.merchantId)
+  paramIdx++
 
   if (filters?.price_max != null) {
     conditions.push(`pe.price_min <= $${paramIdx}`)
@@ -58,14 +80,23 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
     paramIdx++
   }
 
-  // Hybrid search: vector + SQL filters
-  const embeddingStr = `[${queryEmbedding.join(',')}]`
-  const orderBy = sort === 'price_asc' ? 'pe.price_min ASC'
+  // Embedding is bound as a parameter rather than concatenated, so we never
+  // build SQL from the cosine vector string directly.
+  const embeddingParamIdx = paramIdx
+  params.push(embeddingStr)
+  paramIdx++
+
+  const orderBy =
+    sort === 'price_asc' ? 'pe.price_min ASC'
     : sort === 'price_desc' ? 'pe.price_min DESC'
     : sort === 'geo_score' ? 'pe.geo_score DESC'
-    : `1 - (pe.embedding <=> '${embeddingStr}'::vector) DESC` // relevance = cosine similarity
+    : `1 - (pe.embedding <=> $${embeddingParamIdx}::vector) DESC`
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+  const limitParamIdx = paramIdx
+  params.push(limit)
+  paramIdx++
+
+  const whereClause = `WHERE ${conditions.join(' AND ')}`
 
   interface RawProductRow {
     id: string
@@ -101,18 +132,19 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
        pe.shipping_info, pe.return_policy,
        m.id as merchant_id, m.shopify_domain, m.plan as merchant_plan,
        pr.title as raw_title, pr.images as raw_images, pr.variants as raw_variants,
-       1 - (pe.embedding <=> '${embeddingStr}'::vector) AS similarity,
+       1 - (pe.embedding <=> $${embeddingParamIdx}::vector) AS similarity,
        COUNT(*) OVER() as total_count
      FROM products_enriched pe
      JOIN products_raw pr ON pr.id = pe.product_raw_id
      JOIN merchants m ON m.id = pe.merchant_id
      ${whereClause}
      ORDER BY ${orderBy}
-     LIMIT ${limit} OFFSET 0`,
+     LIMIT $${limitParamIdx} OFFSET 0`,
     ...params
   )
 
   const total = rawResults.length > 0 ? parseInt(rawResults[0]?.total_count ?? '0') : 0
+  const checkoutBase = process.env.SHOPIFY_APP_URL ?? 'https://api.commerceagent.io'
 
   // Format results
   const results = rawResults.map(row => {
@@ -142,7 +174,7 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
       },
       images,
       geo_score: row.geo_score,
-      checkout_url: `${process.env.SHOPIFY_APP_URL ?? 'https://api.commerceagent.io'}/v1/checkout/initiate`,
+      checkout_url: `${checkoutBase}/v1/checkout/initiate`,
       use_cases: row.use_cases ?? [],
       target_audience: row.target_audience ?? [],
       comparison: {
@@ -152,17 +184,70 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
     }
   })
 
+  const latency = Date.now() - startTime
   const response: SearchResponse = {
     results,
     total,
     search_id: searchId,
-    latency_ms: Date.now() - startTime,
+    latency_ms: latency,
   }
 
   // Cache for 2 minutes
   await cacheSet(cacheKey, response, 120)
 
+  void persistAgentQuery({
+    id: searchId,
+    agentId,
+    agentType,
+    query,
+    filters,
+    results: results.length,
+    latencyMs: latency,
+  })
+
   return c.json(response)
 })
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+function detectAgentType(userAgent: string): string {
+  const ua = userAgent.toLowerCase()
+  if (ua.includes('claude') || ua.includes('anthropic')) return 'claude'
+  if (ua.includes('chatgpt') || ua.includes('gptbot') || ua.includes('openai')) return 'chatgpt'
+  if (ua.includes('perplexity')) return 'perplexity'
+  if (ua.includes('gemini') || ua.includes('google-extended')) return 'gemini'
+  return 'custom'
+}
+
+interface PersistAgentQueryArgs {
+  id: string
+  agentId: string
+  agentType: string
+  query: string
+  filters: unknown
+  results: number
+  latencyMs: number
+}
+
+async function persistAgentQuery(args: PersistAgentQueryArgs): Promise<void> {
+  try {
+    await prisma.agentQuery.create({
+      data: {
+        // The id field is a UUID, so we let Prisma generate one and use the
+        // search_id only as a client-facing identifier returned in the response.
+        agentId: args.agentId,
+        agentType: args.agentType,
+        queryText: args.query,
+        filters: args.filters as object,
+        resultsCount: args.results,
+        latencyMs: args.latencyMs,
+      },
+    })
+  } catch (err) {
+    console.warn('[Search] Failed to persist agent query:', err instanceof Error ? err.message : err)
+  }
+}
 
 export { searchRouter }

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/teocomyn/commerce-agent-protocol/security/advisories/new
+    about: Please report security issues privately. See SECURITY.md.
+  - name: Question or discussion
+    url: https://github.com/teocomyn/commerce-agent-protocol/discussions
+    about: Ask a question or discuss CAP with the community.

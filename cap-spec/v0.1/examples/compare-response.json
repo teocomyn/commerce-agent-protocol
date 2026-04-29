@@ -1,0 +1,32 @@
+{
+  "comparison": {
+    "winner_by_price": "1d3a78c5-7e22-4f0c-a3a1-94c0f0918a7e",
+    "winner_by_eco":   "8f6c4d12-2b51-4a8e-9f18-d31f2a7f3b10",
+    "matrix": {
+      "price": {
+        "8f6c4d12-2b51-4a8e-9f18-d31f2a7f3b10": 110.0,
+        "1d3a78c5-7e22-4f0c-a3a1-94c0f0918a7e": 95.0
+      },
+      "certifications": {
+        "8f6c4d12-2b51-4a8e-9f18-d31f2a7f3b10": ["OEKO-TEX", "B-Corp"],
+        "1d3a78c5-7e22-4f0c-a3a1-94c0f0918a7e": ["GOTS"]
+      },
+      "shipping_estimate": {
+        "8f6c4d12-2b51-4a8e-9f18-d31f2a7f3b10": "2-4 business days",
+        "1d3a78c5-7e22-4f0c-a3a1-94c0f0918a7e": "5-7 business days"
+      },
+      "free_shipping": {
+        "8f6c4d12-2b51-4a8e-9f18-d31f2a7f3b10": true,
+        "1d3a78c5-7e22-4f0c-a3a1-94c0f0918a7e": false
+      },
+      "spec_weight_g": {
+        "8f6c4d12-2b51-4a8e-9f18-d31f2a7f3b10": 360,
+        "1d3a78c5-7e22-4f0c-a3a1-94c0f0918a7e": 410
+      },
+      "return_days": {
+        "8f6c4d12-2b51-4a8e-9f18-d31f2a7f3b10": 30,
+        "1d3a78c5-7e22-4f0c-a3a1-94c0f0918a7e": 14
+      }
+    }
+  }
+}

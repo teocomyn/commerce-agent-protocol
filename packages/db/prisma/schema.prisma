@@ -16,13 +16,14 @@ datasource db {
 // MERCHANTS
 // ============================================================
 model Merchant {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  shopifyDomain  String   @unique @map("shopify_domain") @db.VarChar(255)
-  shopifyToken   String   @map("shopify_token") // Encrypted AES-256
-  plan           String   @default("free") @db.VarChar(50)
-  settings       Json     @default("{}") @db.JsonB
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shopifyDomain   String   @unique @map("shopify_domain") @db.VarChar(255)
+  shopifyToken    String   @map("shopify_token") // Admin API token, encrypted AES-256-GCM
+  storefrontToken String?  @map("storefront_token") // Storefront API token, encrypted AES-256-GCM (Cart API)
+  plan            String   @default("free") @db.VarChar(50)
+  settings        Json     @default("{}") @db.JsonB
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   productsRaw      ProductRaw[]
   productsEnriched ProductEnriched[]

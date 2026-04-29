@@ -2,13 +2,16 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
     "baseUrl": ".",
     "paths": {
       "@cap/db": ["../../packages/db/src/index.ts"],
       "@cap/shared": ["../../packages/shared/src/index.ts"]
     }
   },
-  "include": ["src/**/*"],
+  "include": [
+    "src/**/*",
+    "../../packages/db/src/**/*",
+    "../../packages/shared/src/**/*"
+  ],
   "exclude": ["node_modules", "dist"]
 }

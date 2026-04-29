@@ -67,10 +67,10 @@ export interface ProductResult {
   certifications: string[]
   availability: {
     in_stock: boolean
-    sizes?: string[]
-    shipping_estimate?: string
-    free_shipping?: boolean
-    return_days?: number
+    sizes?: string[] | undefined
+    shipping_estimate?: string | undefined
+    free_shipping?: boolean | undefined
+    return_days?: number | undefined
   }
   images: string[]
   geo_score: number
@@ -92,8 +92,8 @@ export interface SearchResponse {
 
 export interface CompareResponse {
   comparison: {
-    winner_by_price?: string
-    winner_by_eco?: string
+    winner_by_price?: string | undefined
+    winner_by_eco?: string | undefined
     matrix: Record<string, Record<string, unknown>>
   }
 }

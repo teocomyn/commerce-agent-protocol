@@ -1,0 +1,12 @@
+{
+  "query": "white eco-friendly sneakers for men under 120",
+  "filters": {
+    "price_max": 120,
+    "currency": "EUR",
+    "certifications": ["OEKO-TEX"],
+    "shipping_country": "FR",
+    "in_stock": true
+  },
+  "limit": 3,
+  "sort": "relevance"
+}

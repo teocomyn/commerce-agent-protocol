@@ -1,0 +1,300 @@
+openapi: 3.1.0
+info:
+  title: Commerce Agent Protocol (CAP)
+  version: 0.1.0
+  summary: Open protocol connecting e-commerce catalogs to AI shopping agents.
+  description: |
+    CAP defines the wire format an AI agent uses to discover, compare, and
+    transact against e-commerce catalogs. This document is the normative
+    machine-readable contract for v0.1; see `cap-protocol.md` for the
+    human-readable specification.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact:
+    name: CAP maintainers
+    url: https://github.com/teocomyn/commerce-agent-protocol
+
+servers:
+  - url: https://api.commerceagent.io
+    description: Reference production server
+  - url: http://localhost:3000
+    description: Local reference implementation
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: search
+    description: Product discovery
+  - name: compare
+    description: Side-by-side product comparison
+  - name: checkout
+    description: Transaction initiation
+
+paths:
+  /v1/search:
+    post:
+      tags: [search]
+      summary: Search products
+      operationId: searchProducts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/compare:
+    post:
+      tags: [compare]
+      summary: Compare products side-by-side
+      operationId: compareProducts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompareRequest'
+      responses:
+        '200':
+          description: Comparison matrix
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompareResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/checkout/initiate:
+    post:
+      tags: [checkout]
+      summary: Create a checkout session
+      operationId: initiateCheckout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutInitiateRequest'
+      responses:
+        '200':
+          description: Checkout created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutInitiateResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Out of stock
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502':
+          description: Upstream commerce platform error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Storefront access not provisioned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-CAP-Key
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: API key is not authorized for this merchant or product
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:    { schema: { type: integer } }
+        X-RateLimit-Remaining: { schema: { type: integer } }
+        X-RateLimit-Reset:    { schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:    { type: string, example: PRODUCT_NOT_FOUND }
+            message: { type: string }
+            details: {}
+
+    SearchFilters:
+      type: object
+      properties:
+        price_min:        { type: number, minimum: 0 }
+        price_max:        { type: number, minimum: 0 }
+        currency:         { type: string, enum: [EUR, USD, GBP] }
+        certifications:   { type: array, items: { type: string } }
+        in_stock:         { type: boolean }
+        shipping_country: { type: string, minLength: 2, maxLength: 2 }
+        category:         { type: string }
+
+    SearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:   { type: string, minLength: 1, maxLength: 500 }
+        filters: { $ref: '#/components/schemas/SearchFilters' }
+        limit:   { type: integer, minimum: 1, maximum: 50, default: 5 }
+        sort:    { type: string, enum: [relevance, price_asc, price_desc, geo_score], default: relevance }
+
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount:   { type: number }
+        currency: { type: string }
+
+    Availability:
+      type: object
+      required: [in_stock]
+      properties:
+        in_stock:          { type: boolean }
+        sizes:             { type: array, items: { type: string } }
+        shipping_estimate: { type: string }
+        free_shipping:     { type: boolean }
+        return_days:       { type: integer }
+
+    ProductResult:
+      type: object
+      required: [id, title, merchant, price, availability, checkout_url, geo_score]
+      properties:
+        id:    { type: string }
+        title: { type: string }
+        merchant:
+          type: object
+          required: [name, domain]
+          properties:
+            name:        { type: string }
+            domain:      { type: string }
+            trust_score: { type: number }
+        price:        { $ref: '#/components/schemas/Money' }
+        specs:        { type: object, additionalProperties: true }
+        certifications: { type: array, items: { type: string } }
+        availability: { $ref: '#/components/schemas/Availability' }
+        images:       { type: array, items: { type: string, format: uri } }
+        geo_score:    { type: number, minimum: 0, maximum: 100 }
+        checkout_url: { type: string, format: uri }
+        use_cases:        { type: array, items: { type: string } }
+        target_audience:  { type: array, items: { type: string } }
+        comparison:
+          type: object
+          properties:
+            similar_to:      { type: array, items: { type: string } }
+            differentiators: { type: array, items: { type: string } }
+
+    SearchResponse:
+      type: object
+      required: [results, total, search_id, latency_ms]
+      properties:
+        results:    { type: array, items: { $ref: '#/components/schemas/ProductResult' } }
+        total:      { type: integer }
+        search_id:  { type: string }
+        latency_ms: { type: integer }
+
+    CompareRequest:
+      type: object
+      required: [product_ids]
+      properties:
+        product_ids:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items: { type: string }
+        criteria:
+          type: array
+          items:
+            type: string
+            enum: [price, certifications, shipping, specs, reviews, return_policy]
+
+    CompareResponse:
+      type: object
+      required: [comparison]
+      properties:
+        comparison:
+          type: object
+          required: [matrix]
+          properties:
+            winner_by_price: { type: string }
+            winner_by_eco:   { type: string }
+            matrix:
+              type: object
+              additionalProperties:
+                type: object
+                additionalProperties: true
+
+    CheckoutInitiateRequest:
+      type: object
+      required: [product_id]
+      properties:
+        product_id:       { type: string, format: uuid }
+        variant_id:       { type: string }
+        quantity:         { type: integer, minimum: 1, maximum: 99, default: 1 }
+        shipping_country: { type: string, minLength: 2, maxLength: 2, default: FR }
+        agent_session_id: { type: string, description: 'AgentQuery id returned by /v1/search' }
+
+    CheckoutInitiateResponse:
+      type: object
+      required: [checkout_id, checkout_url, cart_id, amount, product, agent_checkout_id]
+      properties:
+        checkout_id: { type: string }
+        checkout_url: { type: string, format: uri }
+        cart_id:     { type: string }
+        amount:
+          type: object
+          required: [total, subtotal, currency]
+          properties:
+            total:    { type: number }
+            subtotal: { type: number }
+            tax:      { type: [number, 'null'] }
+            currency: { type: string }
+        product:
+          type: object
+          required: [id, title, variant_id, quantity]
+          properties:
+            id:        { type: string }
+            title:     { type: string }
+            variant_id: { type: string }
+            quantity:  { type: integer }
+        agent_checkout_id: { type: string, format: uuid }
+        expires_at:        { type: string, format: date-time }

@@ -1,0 +1,9 @@
+# Default owner for everything in the repo.
+# Update once additional maintainers are added.
+*       @teocomyn
+
+# Protocol spec changes require explicit maintainer review.
+/cap-spec/        @teocomyn
+/.github/         @teocomyn
+/SECURITY.md      @teocomyn
+/LICENSE          @teocomyn

@@ -1,0 +1,7 @@
+{
+  "product_ids": [
+    "8f6c4d12-2b51-4a8e-9f18-d31f2a7f3b10",
+    "1d3a78c5-7e22-4f0c-a3a1-94c0f0918a7e"
+  ],
+  "criteria": ["price", "certifications", "shipping", "specs", "return_policy"]
+}

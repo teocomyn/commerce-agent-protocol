@@ -1,0 +1,19 @@
+{
+  "id": "checkout-001",
+  "title": "Unknown product_id returns 404 PRODUCT_NOT_FOUND",
+  "operation": "POST /v1/checkout/initiate",
+  "request": {
+    "headers": { "X-CAP-Key": "${VALID_KEY}" },
+    "body": {
+      "product_id": "00000000-0000-0000-0000-000000000000",
+      "quantity": 1,
+      "shipping_country": "FR"
+    }
+  },
+  "expect": {
+    "status": 404,
+    "body_matches": {
+      "error.code": "PRODUCT_NOT_FOUND"
+    }
+  }
+}

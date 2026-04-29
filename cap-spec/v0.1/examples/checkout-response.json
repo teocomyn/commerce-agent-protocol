@@ -1,0 +1,19 @@
+{
+  "checkout_id": "gid://shopify/Cart/Z2NwLXVzLWVhc3QxOjAxSlpRWE...",
+  "checkout_url": "https://veja-store.myshopify.com/checkouts/cn/Z2NwLXVz...",
+  "cart_id": "gid://shopify/Cart/Z2NwLXVzLWVhc3QxOjAxSlpRWE...",
+  "amount": {
+    "total": 110.00,
+    "subtotal": 110.00,
+    "tax": 18.33,
+    "currency": "EUR"
+  },
+  "product": {
+    "id": "8f6c4d12-2b51-4a8e-9f18-d31f2a7f3b10",
+    "title": "VEJA Campo Chromefree White",
+    "variant_id": "44231180173468",
+    "quantity": 1
+  },
+  "agent_checkout_id": "c4f0a1c2-7b1c-4f8e-b3a2-2f0e7e1a9d11",
+  "expires_at": "2026-05-01T10:00:00.000Z"
+}

@@ -7,6 +7,7 @@ const compareRouter = new Hono()
 
 // POST /v1/compare
 compareRouter.post('/', zValidator('json', CompareRequestSchema), async (c) => {
+  const auth = c.get('auth')
   const { product_ids, criteria } = c.req.valid('json')
 
   // Fetch all products
@@ -32,8 +33,11 @@ compareRouter.post('/', zValidator('json', CompareRequestSchema), async (c) => {
        pr.title as raw_title
      FROM products_enriched pe
      JOIN products_raw pr ON pr.id = pe.product_raw_id
-     WHERE pe.id = ANY($1::uuid[]) AND pe.deleted_at IS NULL`,
-    product_ids
+     WHERE pe.id = ANY($1::uuid[])
+       AND pe.merchant_id = $2::uuid
+       AND pe.deleted_at IS NULL`,
+    product_ids,
+    auth.merchantId,
   )
 
   if (products.length < 2) {

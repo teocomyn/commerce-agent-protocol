@@ -1,0 +1,13 @@
+{
+  "id": "search-001",
+  "title": "Empty query is rejected",
+  "operation": "POST /v1/search",
+  "request": {
+    "headers": { "X-CAP-Key": "${VALID_KEY}" },
+    "body": { "query": "" }
+  },
+  "expect": {
+    "status": 400,
+    "body_has_path": "error.code"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "results": [
+    {
+      "id": "8f6c4d12-2b51-4a8e-9f18-d31f2a7f3b10",
+      "title": "VEJA Campo Chromefree White",
+      "merchant": {
+        "name": "veja store",
+        "domain": "veja-store.myshopify.com",
+        "trust_score": 92
+      },
+      "price": { "amount": 110.0, "currency": "EUR" },
+      "specs": {
+        "upper_material": "leather (chrome-free)",
+        "outsole_material": "rubber",
+        "weight_g": 360
+      },
+      "certifications": ["OEKO-TEX", "B-Corp"],
+      "availability": {
+        "in_stock": true,
+        "sizes": ["41", "42", "43", "44"],
+        "shipping_estimate": "2-4 business days",
+        "free_shipping": true,
+        "return_days": 30
+      },
+      "images": [
+        "https://cdn.shopify.com/.../campo-white-1.jpg"
+      ],
+      "geo_score": 87,
+      "checkout_url": "https://api.commerceagent.io/v1/checkout/initiate",
+      "use_cases": ["everyday", "casual", "minimalist outfit"],
+      "target_audience": ["men", "eco-conscious"],
+      "comparison": {
+        "similar_to": ["Veja Esplar", "Common Projects Achilles"],
+        "differentiators": ["chrome-free leather", "B-Corp"]
+      }
+    }
+  ],
+  "total": 1,
+  "search_id": "srch_8a1d92f0",
+  "latency_ms": 142
+}

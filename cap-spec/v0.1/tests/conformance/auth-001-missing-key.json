@@ -1,0 +1,15 @@
+{
+  "id": "auth-001",
+  "title": "Missing X-CAP-Key returns 401 with MISSING_API_KEY",
+  "operation": "POST /v1/search",
+  "request": {
+    "headers": {},
+    "body": { "query": "anything" }
+  },
+  "expect": {
+    "status": 401,
+    "body_matches": {
+      "error.code": "MISSING_API_KEY"
+    }
+  }
+}

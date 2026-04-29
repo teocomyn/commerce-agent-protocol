@@ -1,0 +1,15 @@
+{
+  "id": "auth-002",
+  "title": "Bearer-style key without cap_ prefix returns 401 INVALID_API_KEY",
+  "operation": "POST /v1/search",
+  "request": {
+    "headers": { "X-CAP-Key": "totally-not-a-cap-key" },
+    "body": { "query": "anything" }
+  },
+  "expect": {
+    "status": 401,
+    "body_matches": {
+      "error.code": "INVALID_API_KEY"
+    }
+  }
+}

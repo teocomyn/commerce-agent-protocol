@@ -104,7 +104,7 @@ export interface ShopifyProduct {
 
 export interface ShopifyProductsPage {
   products: ShopifyProduct[]
-  nextPageInfo?: string
+  nextPageInfo?: string | undefined
 }
 
 export async function fetchShopifyProducts(
@@ -173,45 +173,146 @@ export async function fetchShopifyProduct(
 }
 
 // ============================================================
-// CHECKOUT (Storefront API)
+// STOREFRONT ACCESS TOKEN (Admin API)
 // ============================================================
+// The Cart API requires a Storefront Access Token. We provision one per merchant
+// during the OAuth callback using the Admin API.
 
-export interface CheckoutCreateInput {
-  variantId: string // Shopify GID
-  quantity: number
-  shippingCountry: string
+export async function ensureStorefrontAccessToken(
+  shop: string,
+  adminToken: string
+): Promise<string> {
+  const url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/storefront_access_tokens.json`
+
+  // Try to reuse an existing CAP token
+  const listRes = await fetch(url, {
+    headers: {
+      'X-Shopify-Access-Token': adminToken,
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (listRes.ok) {
+    const listData = (await listRes.json()) as {
+      storefront_access_tokens?: Array<{ access_token: string; title: string }>
+    }
+    const existing = listData.storefront_access_tokens?.find(
+      (t) => t.title === 'CAP'
+    )
+    if (existing?.access_token) return existing.access_token
+  }
+
+  // Otherwise create a new one
+  const createRes = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'X-Shopify-Access-Token': adminToken,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      storefront_access_token: { title: 'CAP' },
+    }),
+  })
+
+  if (!createRes.ok) {
+    throw new Error(
+      `Failed to create storefront access token: ${createRes.status} ${createRes.statusText}`
+    )
+  }
+
+  const createData = (await createRes.json()) as {
+    storefront_access_token: { access_token: string }
+  }
+  return createData.storefront_access_token.access_token
 }
 
-export interface ShopifyCheckoutResult {
+// ============================================================
+// CART API (Storefront GraphQL — replaces deprecated checkoutCreate)
+// ============================================================
+
+export interface CartCreateInput {
+  variantId: string // Shopify GID, e.g. "gid://shopify/ProductVariant/123"
+  quantity: number
+  shippingCountry?: string
+  buyerIdentity?: {
+    email?: string
+    countryCode?: string
+  }
+}
+
+export interface ShopifyCartResult {
+  cartId: string
   checkoutUrl: string
-  checkoutId: string
-  totalPrice: string
-  subtotalPrice: string
-  totalTax: string
+  totalAmount: string
+  subtotalAmount: string
+  totalTax: string | null
   currency: string
 }
 
-export async function createShopifyCheckout(
+export interface ShopifyCartUserError {
+  code?: string
+  field?: string[]
+  message: string
+}
+
+export class ShopifyCartError extends Error {
+  constructor(
+    message: string,
+    public readonly userErrors: ShopifyCartUserError[] = []
+  ) {
+    super(message)
+    this.name = 'ShopifyCartError'
+  }
+}
+
+/**
+ * Create a Shopify Cart and return its checkoutUrl.
+ *
+ * Uses the Storefront API `cartCreate` mutation (2024-10), which replaces the
+ * deprecated `checkoutCreate` mutation. The returned `checkoutUrl` is the URL
+ * the agent (or the user) opens to complete payment.
+ *
+ * @see https://shopify.dev/docs/api/storefront/latest/mutations/cartCreate
+ */
+export async function createShopifyCart(
   shop: string,
   storefrontToken: string,
-  input: CheckoutCreateInput
-): Promise<ShopifyCheckoutResult> {
-  const query = `
-    mutation checkoutCreate($input: CheckoutCreateInput!) {
-      checkoutCreate(input: $input) {
-        checkout {
+  input: CartCreateInput
+): Promise<ShopifyCartResult> {
+  const query = /* GraphQL */ `
+    mutation cartCreate($input: CartInput!) {
+      cartCreate(input: $input) {
+        cart {
           id
-          webUrl
-          totalPriceV2 { amount currencyCode }
-          subtotalPriceV2 { amount currencyCode }
-          totalTaxV2 { amount currencyCode }
+          checkoutUrl
+          totalQuantity
+          cost {
+            totalAmount { amount currencyCode }
+            subtotalAmount { amount currencyCode }
+            totalTaxAmount { amount currencyCode }
+          }
         }
-        checkoutUserErrors {
-          code field message
-        }
+        userErrors { code field message }
       }
     }
   `
+
+  const variantGid = input.variantId.startsWith('gid://')
+    ? input.variantId
+    : `gid://shopify/ProductVariant/${input.variantId}`
+
+  const cartInput: Record<string, unknown> = {
+    lines: [{ merchandiseId: variantGid, quantity: input.quantity }],
+  }
+
+  const countryCode =
+    input.buyerIdentity?.countryCode ?? input.shippingCountry
+  if (countryCode || input.buyerIdentity?.email) {
+    cartInput['buyerIdentity'] = {
+      ...(input.buyerIdentity?.email && { email: input.buyerIdentity.email }),
+      ...(countryCode && { countryCode: countryCode.toUpperCase() }),
+    }
+  }
 
   const response = await fetch(
     `https://${shop}/api/${SHOPIFY_API_VERSION}/graphql.json`,
@@ -221,43 +322,60 @@ export async function createShopifyCheckout(
         'Content-Type': 'application/json',
         'X-Shopify-Storefront-Access-Token': storefrontToken,
       },
-      body: JSON.stringify({
-        query,
-        variables: {
-          input: {
-            lineItems: [{ variantId: input.variantId, quantity: input.quantity }],
-            shippingAddress: { country: input.shippingCountry },
-          },
-        },
-      }),
+      body: JSON.stringify({ query, variables: { input: cartInput } }),
     }
   )
 
-  interface CheckoutData {
-    data: {
-      checkoutCreate: {
-        checkout: {
-          id: string
-          webUrl: string
-          totalPriceV2: { amount: string; currencyCode: string }
-          subtotalPriceV2: { amount: string; currencyCode: string }
-          totalTaxV2: { amount: string; currencyCode: string }
-        }
-        checkoutUserErrors: { code: string; field: string; message: string }[]
-      }
-    }
+  if (!response.ok) {
+    throw new ShopifyCartError(
+      `Storefront API HTTP ${response.status}: ${response.statusText}`
+    )
   }
 
-  const data = (await response.json()) as CheckoutData
-  const checkout = data.data.checkoutCreate.checkout
+  interface CartCreateData {
+    data?: {
+      cartCreate?: {
+        cart: {
+          id: string
+          checkoutUrl: string
+          totalQuantity: number
+          cost: {
+            totalAmount: { amount: string; currencyCode: string }
+            subtotalAmount: { amount: string; currencyCode: string }
+            totalTaxAmount: { amount: string; currencyCode: string } | null
+          }
+        } | null
+        userErrors: ShopifyCartUserError[]
+      }
+    }
+    errors?: Array<{ message: string }>
+  }
+
+  const data = (await response.json()) as CartCreateData
+
+  if (data.errors?.length) {
+    throw new ShopifyCartError(
+      `Storefront GraphQL error: ${data.errors.map((e) => e.message).join('; ')}`
+    )
+  }
+
+  const userErrors = data.data?.cartCreate?.userErrors ?? []
+  const cart = data.data?.cartCreate?.cart
+
+  if (!cart) {
+    throw new ShopifyCartError(
+      userErrors[0]?.message ?? 'Cart creation failed',
+      userErrors
+    )
+  }
 
   return {
-    checkoutId: checkout.id,
-    checkoutUrl: checkout.webUrl,
-    totalPrice: checkout.totalPriceV2.amount,
-    subtotalPrice: checkout.subtotalPriceV2.amount,
-    totalTax: checkout.totalTaxV2.amount,
-    currency: checkout.totalPriceV2.currencyCode,
+    cartId: cart.id,
+    checkoutUrl: cart.checkoutUrl,
+    totalAmount: cart.cost.totalAmount.amount,
+    subtotalAmount: cart.cost.subtotalAmount.amount,
+    totalTax: cart.cost.totalTaxAmount?.amount ?? null,
+    currency: cart.cost.totalAmount.currencyCode,
   }
 }
 

@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Rate limit exceeded. Max 100 requests/minute for free plan.",
+    "details": {
+      "reset_at": "2026-04-30T00:01:00.000Z"
+    }
+  }
+}

@@ -93,6 +93,14 @@ webhookRouter.post('/shopify', async (c) => {
       await redis.expire(`stock:${shopDomain}`, 86_400) // 24h TTL
       break
 
+    case 'orders/create':
+    case 'orders/paid':
+      // Reconcile AgentCheckout: a Shopify order may carry the cart_token
+      // (Storefront cart id) in its payload. We mark any matching pending
+      // checkouts as completed.
+      await reconcileAgentCheckout(merchant.id, payload, topic === 'orders/paid')
+      break
+
     case 'app/uninstalled':
       // Cleanup merchant data
       await prisma.merchant.update({
@@ -105,5 +113,79 @@ webhookRouter.post('/shopify', async (c) => {
 
   return c.json({ received: true }, 200)
 })
+
+/**
+ * Look up the AgentCheckout that matches a Shopify order payload and mark it
+ * as completed. Shopify exposes the original Storefront cart id on orders via
+ * the `cart_token` field. We cross-reference our cart id (stored in
+ * `agent_checkouts.shopify_checkout_id`) against this token, falling back to
+ * the most recent pending checkout for the same merchant + amount when no
+ * cart_token is present.
+ */
+async function reconcileAgentCheckout(
+  merchantId: string,
+  payload: Record<string, unknown>,
+  isPaid: boolean,
+): Promise<void> {
+  const cartToken = payload['cart_token'] as string | undefined
+  const orderId = String(payload['id'] ?? '')
+  const totalRaw = payload['total_price'] as string | undefined
+  const total = totalRaw ? parseFloat(totalRaw) : null
+
+  let checkout = null
+  if (cartToken) {
+    checkout = await prisma.agentCheckout.findFirst({
+      where: {
+        merchantId,
+        // Shopify cart_token is the suffix of `gid://shopify/Cart/<token>`
+        OR: [
+          { shopifyCheckoutId: cartToken },
+          { shopifyCheckoutId: `gid://shopify/Cart/${cartToken}` },
+        ],
+        status: 'pending',
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+  }
+
+  if (!checkout && total != null) {
+    // Fallback: best-effort match by merchant + amount within the last hour.
+    checkout = await prisma.agentCheckout.findFirst({
+      where: {
+        merchantId,
+        status: 'pending',
+        amount: total,
+        createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+  }
+
+  if (!checkout) {
+    console.log(
+      `[Webhook] orders/${isPaid ? 'paid' : 'create'} ${orderId} – no matching AgentCheckout`,
+    )
+    return
+  }
+
+  await prisma.agentCheckout.update({
+    where: { id: checkout.id },
+    data: {
+      status: 'completed',
+      ...(total != null && { amount: total }),
+    },
+  })
+
+  if (checkout.agentQueryId) {
+    await prisma.agentQuery.update({
+      where: { id: checkout.agentQueryId },
+      data: { converted: true },
+    })
+  }
+
+  console.log(
+    `[Webhook] AgentCheckout ${checkout.id} marked completed (order ${orderId})`,
+  )
+}
 
 export { webhookRouter }

@@ -25,6 +25,7 @@ Capture*.png
 .DS_Store
 .idea/
 .vscode/
+.claude/
 
 # Test / coverage
 coverage/
