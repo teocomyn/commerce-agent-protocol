@@ -1,17 +1,28 @@
 version: 2
 updates:
+  # Group ALL npm updates into a single weekly PR.
+  # Major bumps are excluded (require manual review per CONTRIBUTING).
   - package-ecosystem: npm
     directory: "/"
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     groups:
-      minor-and-patch:
-        update-types: [minor, patch]
+      all-deps:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
     labels:
       - dependencies
+    ignore:
+      # Skip major bumps in the auto-grouping. Open them manually when ready.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
+  # GitHub Actions move slowly; monthly is enough.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
