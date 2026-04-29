@@ -1,0 +1,25 @@
+{
+  "name": "@cap/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CAP database package — Prisma ORM + migrations",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio",
+    "db:seed": "tsx src/seed.ts",
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.16.0",
+    "prisma": "^5.16.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.15.0",
+    "typescript": "^5.5.0"
+  }
+}

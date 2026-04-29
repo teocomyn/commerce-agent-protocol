@@ -1,0 +1,168 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector, uuidOssp(map: "uuid-ossp"), pgcrypto]
+}
+
+// ============================================================
+// MERCHANTS
+// ============================================================
+model Merchant {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shopifyDomain  String   @unique @map("shopify_domain") @db.VarChar(255)
+  shopifyToken   String   @map("shopify_token") // Encrypted AES-256
+  plan           String   @default("free") @db.VarChar(50)
+  settings       Json     @default("{}") @db.JsonB
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  productsRaw      ProductRaw[]
+  productsEnriched ProductEnriched[]
+  apiKeys          ApiKey[]
+  agentCheckouts   AgentCheckout[]
+
+  @@map("merchants")
+}
+
+// ============================================================
+// RAW PRODUCTS (Shopify mirror)
+// ============================================================
+model ProductRaw {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  merchantId  String   @map("merchant_id") @db.Uuid
+  shopifyId   BigInt   @map("shopify_id")
+  title       String
+  description String?
+  vendor      String?  @db.VarChar(255)
+  productType String?  @map("product_type") @db.VarChar(255)
+  tags        String[]
+  variants    Json     @db.JsonB  // price, SKU, stock, options
+  images      Json?    @db.JsonB
+  metafields  Json?    @db.JsonB
+  status      String?  @db.VarChar(50)
+  syncedAt    DateTime @default(now()) @map("synced_at") @db.Timestamptz
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
+
+  merchant         Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  productEnriched  ProductEnriched?
+
+  @@unique([merchantId, shopifyId])
+  @@map("products_raw")
+}
+
+// ============================================================
+// ENRICHED PRODUCTS (agent-ready)
+// ============================================================
+model ProductEnriched {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productRawId String   @unique @map("product_raw_id") @db.Uuid
+  merchantId   String   @map("merchant_id") @db.Uuid
+
+  // Structured data (LLM-generated)
+  category       String?  @db.VarChar(255)
+  subcategory    String?  @db.VarChar(255)
+  specs          Json     @db.JsonB     // {"material": "cotton", ...}
+  useCases       String[] @map("use_cases")
+  targetAudience String[] @map("target_audience")
+  certifications String[]
+  careInfo       String?  @map("care_info")
+  sizeGuide      Json?    @map("size_guide") @db.JsonB
+  comparisonTags String[] @map("comparison_tags")
+
+  // Transactional data
+  priceMin     Decimal? @map("price_min") @db.Decimal(10, 2)
+  priceMax     Decimal? @map("price_max") @db.Decimal(10, 2)
+  currency     String   @default("EUR") @db.VarChar(3)
+  shippingInfo Json?    @map("shipping_info") @db.JsonB
+  returnPolicy Json?    @map("return_policy") @db.JsonB
+
+  // GEO scoring
+  geoScore    Float  @default(0) @map("geo_score")
+  completeness Float @default(0)
+
+  // Vector embedding (1536 dims — text-embedding-3-small)
+  // Stored as Unsupported because Prisma doesn't natively support pgvector
+  // We use raw SQL for vector operations
+  enrichedAt DateTime @default(now()) @map("enriched_at") @db.Timestamptz
+  version    Int      @default(1)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz
+
+  productRaw     ProductRaw      @relation(fields: [productRawId], references: [id], onDelete: Cascade)
+  merchant       Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  agentQueries   AgentQuery[]
+  agentCheckouts AgentCheckout[]
+
+  @@index([merchantId], name: "idx_enriched_merchant")
+  @@index([category, subcategory], name: "idx_enriched_category")
+  @@map("products_enriched")
+}
+
+// ============================================================
+// API KEYS
+// ============================================================
+model ApiKey {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  merchantId String    @map("merchant_id") @db.Uuid
+  keyHash    String    @unique @map("key_hash")  // SHA-256 of the actual key
+  keyPrefix  String    @map("key_prefix") @db.VarChar(16)  // "cap_live_xxxx..." for display
+  label      String?   @db.VarChar(255)
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+// ============================================================
+// AGENT QUERIES (analytics)
+// ============================================================
+model AgentQuery {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentId         String   @map("agent_id") @db.VarChar(255)
+  agentType       String?  @map("agent_type") @db.VarChar(100)  // chatgpt | perplexity | gemini | custom
+  queryText       String?  @map("query_text")
+  filters         Json?    @db.JsonB
+  resultsCount    Int?     @map("results_count")
+  selectedProduct String?  @map("selected_product") @db.Uuid
+  converted       Boolean  @default(false)
+  latencyMs       Int?     @map("latency_ms")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  productEnriched ProductEnriched? @relation(fields: [selectedProduct], references: [id])
+  agentCheckouts  AgentCheckout[]
+
+  @@index([createdAt], name: "idx_agent_queries_created")
+  @@index([agentType], name: "idx_agent_queries_type")
+  @@map("agent_queries")
+}
+
+// ============================================================
+// AGENT CHECKOUTS
+// ============================================================
+model AgentCheckout {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentQueryId      String?  @map("agent_query_id") @db.Uuid
+  merchantId        String   @map("merchant_id") @db.Uuid
+  productId         String   @map("product_id") @db.Uuid
+  shopifyCheckoutId String?  @map("shopify_checkout_id") @db.VarChar(255)
+  status            String   @default("pending") @db.VarChar(50)  // pending | completed | abandoned
+  amount            Decimal? @db.Decimal(10, 2)
+  currency          String?  @db.VarChar(3)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  agentQuery      AgentQuery?      @relation(fields: [agentQueryId], references: [id])
+  merchant        Merchant         @relation(fields: [merchantId], references: [id])
+  productEnriched ProductEnriched  @relation(fields: [productId], references: [id])
+
+  @@map("agent_checkouts")
+}

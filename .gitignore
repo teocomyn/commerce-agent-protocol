@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Environment & secrets
+.env
+.env.*.local
+!.env.example
+
+# Build outputs
+dist/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# Logs & debug
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Personal screenshots (project folder)
+Capture*.png
+
+# OS & IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Test / coverage
+coverage/
+
+# Prisma generated (optional — remove if you prefer committing client)
+# packages/db/node_modules/.prisma/
