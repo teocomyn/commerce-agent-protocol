@@ -2,6 +2,7 @@ import { Badge } from './badge'
 import { Button } from './button'
 import { ArrowRight, GitHubIcon } from './icons'
 import { FlickeringGrid } from './ui/flickering-grid'
+import { ShinyButton } from './ui/shiny-button'
 
 export function Hero() {
   return (
@@ -69,18 +70,18 @@ export function Hero() {
         </p>
 
         <div
-          className="flex flex-wrap gap-3 justify-center mt-10 animate-fade-up"
+          className="flex flex-wrap gap-3 justify-center mt-10 animate-fade-up items-center"
           style={{ animationDelay: '240ms' }}
         >
-          <Button
-            variant="primary"
-            size="lg"
+          <ShinyButton
             href="https://github.com/teocomyn/commerce-agent-protocol/tree/main/cap-spec"
             external
           >
-            <span>Read the spec</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </Button>
+            <span className="inline-flex items-center gap-2">
+              Read the spec
+              <ArrowRight className="w-3.5 h-3.5" />
+            </span>
+          </ShinyButton>
           <Button
             variant="secondary"
             size="lg"

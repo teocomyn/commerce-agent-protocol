@@ -1,5 +1,6 @@
 import { Button } from './button'
 import { ArrowRight, GitHubIcon } from './icons'
+import { ShinyButton } from './ui/shiny-button'
 
 export function CtaBanner() {
   return (
@@ -28,11 +29,13 @@ export function CtaBanner() {
           The protocol is open. The reference is shipping. The agents are ready.
           Plug your catalog in 5 minutes.
         </p>
-        <div className="flex flex-wrap gap-3 justify-center mt-10">
-          <Button variant="primary" size="lg" href="https://github.com/teocomyn/commerce-agent-protocol/tree/main/cap-spec" external>
-            <span>Read the spec</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </Button>
+        <div className="flex flex-wrap gap-3 justify-center mt-10 items-center">
+          <ShinyButton href="https://github.com/teocomyn/commerce-agent-protocol/tree/main/cap-spec" external>
+            <span className="inline-flex items-center gap-2">
+              Read the spec
+              <ArrowRight className="w-3.5 h-3.5" />
+            </span>
+          </ShinyButton>
           <Button variant="secondary" size="lg" href="https://github.com/teocomyn/commerce-agent-protocol" external>
             <GitHubIcon className="w-4 h-4" />
             <span>github.com/teocomyn/cap</span>

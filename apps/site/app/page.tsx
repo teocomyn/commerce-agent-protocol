@@ -1,8 +1,8 @@
 import { SiteNav } from '@/components/site-nav'
-import { SiteFooter } from '@/components/site-footer'
+import { Footer } from '@/components/ui/footer-section'
 import { Hero } from '@/components/hero'
 import { Marquee } from '@/components/marquee'
-import { Pillars } from '@/components/pillars'
+import { FeaturesBento } from '@/components/features-bento'
 import { Architecture } from '@/components/architecture'
 import { WhyCap } from '@/components/why-cap'
 import { Comparison } from '@/components/comparison'
@@ -10,6 +10,7 @@ import { GlobeSection } from '@/components/globe-section'
 import { Pricing } from '@/components/pricing'
 import { Roadmap } from '@/components/roadmap'
 import { Faq } from '@/components/faq'
+import { CpuSection } from '@/components/cpu-section'
 import { CtaBanner } from '@/components/cta-banner'
 
 export default function HomePage() {
@@ -19,7 +20,7 @@ export default function HomePage() {
       <main>
         <Hero />
         <Marquee />
-        <Pillars />
+        <FeaturesBento />
         <Architecture />
         <WhyCap />
         <Comparison />
@@ -27,9 +28,10 @@ export default function HomePage() {
         <Pricing />
         <Roadmap />
         <Faq />
+        <CpuSection />
         <CtaBanner />
       </main>
-      <SiteFooter />
+      <Footer />
     </>
   )
 }
