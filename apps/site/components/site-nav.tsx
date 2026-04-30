@@ -6,8 +6,7 @@ const links = [
   { label: 'Protocol', href: '#protocol' },
   { label: 'Architecture', href: '#architecture' },
   { label: 'Spec', href: 'https://github.com/teocomyn/commerce-agent-protocol/tree/main/cap-spec' },
-  { label: 'Pricing', href: '#pricing' },
-  { label: 'Roadmap', href: '#roadmap' },
+  { label: 'GitHub', href: 'https://github.com/teocomyn/commerce-agent-protocol' },
 ]
 
 export function SiteNav() {
