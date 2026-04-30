@@ -125,6 +125,49 @@ importers:
         specifier: ^5.5.0
         version: 5.9.3
 
+  apps/site:
+    dependencies:
+      clsx:
+        specifier: ^2.1.0
+        version: 2.1.1
+      geist:
+        specifier: ^1.3.0
+        version: 1.7.0(next@15.5.14(react-dom@19.2.5(react@19.2.5))(react@19.2.5))
+      lucide-react:
+        specifier: ^0.400.0
+        version: 0.400.0(react@19.2.5)
+      next:
+        specifier: ^15.0.0
+        version: 15.5.14(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      react:
+        specifier: ^19.2.5
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.2.5
+        version: 19.2.5(react@19.2.5)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.14)
+      autoprefixer:
+        specifier: ^10.4.0
+        version: 10.5.0(postcss@8.5.12)
+      postcss:
+        specifier: ^8.4.0
+        version: 8.5.12
+      tailwindcss:
+        specifier: ^3.4.0
+        version: 3.4.19(tsx@4.21.0)
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
   packages/db:
     dependencies:
       '@prisma/client':
@@ -1413,6 +1456,11 @@ packages:
 
   function-bind@1.1.2:
     resolution: {integrity: sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA==}
+
+  geist@1.7.0:
+    resolution: {integrity: sha512-ZaoiZwkSf0DwwB1ncdLKp+ggAldqxl5L1+SXaNIBGkPAqcu+xjVJLxlf3/S8vLt9UHx1xu5fz3lbzKCj5iOVdQ==}
+    peerDependencies:
+      next: '>=13.2.0'
 
   get-intrinsic@1.3.0:
     resolution: {integrity: sha512-9fSjSaos/fRIVIp+xSJlE6lfwhES7LNtKaCBIamHsjr2na1BiABJPo0mOjjz8GJDURarmCPGqaiVg5mfjb98CQ==}
@@ -3270,6 +3318,10 @@ snapshots:
     optional: true
 
   function-bind@1.1.2: {}
+
+  geist@1.7.0(next@15.5.14(react-dom@19.2.5(react@19.2.5))(react@19.2.5)):
+    dependencies:
+      next: 15.5.14(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
 
   get-intrinsic@1.3.0:
     dependencies:
