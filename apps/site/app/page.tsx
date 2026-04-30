@@ -3,7 +3,6 @@ import { SiteFooter } from '@/components/site-footer'
 import { Hero } from '@/components/hero'
 import { Marquee } from '@/components/marquee'
 import { Pillars } from '@/components/pillars'
-import { CodeTabs } from '@/components/code-tabs'
 import { Architecture } from '@/components/architecture'
 import { WhyCap } from '@/components/why-cap'
 import { Comparison } from '@/components/comparison'
@@ -21,7 +20,6 @@ export default function HomePage() {
         <Hero />
         <Marquee />
         <Pillars />
-        <CodeTabs />
         <Architecture />
         <WhyCap />
         <Comparison />
