@@ -25,11 +25,11 @@
     "ioredis": "^5.4.0",
     "openai": "^4.57.0",
     "zod": "^3.23.0",
-    "@hono/node-server": "^1.13.0",
+    "@hono/node-server": "^1.19.14",
     "@hono/zod-validator": "^0.7.6"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.19.17",
     "tsx": "^4.15.0",
     "tsc-alias": "^1.8.0",
     "typescript": "^5.5.0",
