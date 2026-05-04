@@ -29,6 +29,7 @@ model Merchant {
   productsEnriched ProductEnriched[]
   apiKeys          ApiKey[]
   agentCheckouts   AgentCheckout[]
+  agentQueries     AgentQuery[]
 
   @@map("merchants")
 }
@@ -129,6 +130,7 @@ model ApiKey {
 // ============================================================
 model AgentQuery {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  merchantId      String?  @map("merchant_id") @db.Uuid
   agentId         String   @map("agent_id") @db.VarChar(255)
   agentType       String?  @map("agent_type") @db.VarChar(100)  // chatgpt | perplexity | gemini | custom
   queryText       String?  @map("query_text")
@@ -139,11 +141,13 @@ model AgentQuery {
   latencyMs       Int?     @map("latency_ms")
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
 
+  merchant        Merchant?       @relation(fields: [merchantId], references: [id], onDelete: SetNull)
   productEnriched ProductEnriched? @relation(fields: [selectedProduct], references: [id])
   agentCheckouts  AgentCheckout[]
 
   @@index([createdAt], name: "idx_agent_queries_created")
   @@index([agentType], name: "idx_agent_queries_type")
+  @@index([merchantId], name: "idx_agent_queries_merchant")
   @@map("agent_queries")
 }
 

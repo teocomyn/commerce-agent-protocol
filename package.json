@@ -19,7 +19,8 @@
     "db:migrate": "pnpm --filter=@cap/db db:migrate",
     "db:push": "pnpm --filter=@cap/db db:push",
     "db:studio": "pnpm --filter=@cap/db db:studio",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore"
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore",
+    "dev:workers": "pnpm --filter=@cap/api dev:workers"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

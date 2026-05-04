@@ -24,19 +24,32 @@ function StatCard({ label, value, sub, icon, color = '#6c63ff' }: StatCardProps)
 }
 
 export default async function DashboardOverview() {
-  // Fetch aggregate stats
-  const [merchantCount, productCount, avgGeoScore, queryCount] = await Promise.all([
+  const firstMerchant = await prisma.merchant.findFirst({
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  })
+  const storeScope =
+    firstMerchant != null ? { merchantId: firstMerchant.id } : {}
+
+  const [merchantCount, productCount, geoAgg, queryCount] = await Promise.all([
     prisma.merchant.count(),
-    prisma.productEnriched.count({ where: { deletedAt: null } }),
-    prisma.$queryRaw<[{ avg: number | null }]>`SELECT AVG(geo_score) as avg FROM products_enriched WHERE deleted_at IS NULL`,
-    prisma.agentQuery.count(),
+    prisma.productEnriched.count({
+      where: { deletedAt: null, ...storeScope },
+    }),
+    prisma.productEnriched.aggregate({
+      where: { deletedAt: null, ...storeScope },
+      _avg: { geoScore: true },
+    }),
+    prisma.agentQuery.count({
+      where: firstMerchant ? { merchantId: firstMerchant.id } : {},
+    }),
   ])
 
-  const avgScore = Math.round(avgGeoScore[0]?.avg ?? 0)
+  const avgScore = Math.round(geoAgg._avg.geoScore ?? 0)
 
   // Recent activity
   const recentProducts = await prisma.productEnriched.findMany({
-    where: { deletedAt: null },
+    where: { deletedAt: null, ...storeScope },
     orderBy: { enrichedAt: 'desc' },
     take: 5,
     include: { productRaw: { select: { title: true } }, merchant: { select: { shopifyDomain: true } } },

@@ -24,6 +24,13 @@ export default async function ProductsPage({
   const pageSize = 20
   const offset = (page - 1) * pageSize
 
+  const firstMerchant = await prisma.merchant.findFirst({
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  })
+  const storeScope =
+    firstMerchant != null ? { merchantId: firstMerchant.id } : {}
+
   const orderByMap: Record<string, object> = {
     geo_asc: { geoScore: 'asc' },
     geo_desc: { geoScore: 'desc' },
@@ -32,7 +39,7 @@ export default async function ProductsPage({
 
   const [products, total] = await Promise.all([
     prisma.productEnriched.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...storeScope },
       orderBy: orderByMap[sort] ?? { geoScore: 'asc' },
       take: pageSize,
       skip: offset,
@@ -41,7 +48,7 @@ export default async function ProductsPage({
         merchant: { select: { shopifyDomain: true, plan: true } },
       },
     }),
-    prisma.productEnriched.count({ where: { deletedAt: null } }),
+    prisma.productEnriched.count({ where: { deletedAt: null, ...storeScope } }),
   ])
 
   const totalPages = Math.ceil(total / pageSize)

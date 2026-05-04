@@ -38,11 +38,12 @@ export type CompareRequest = z.infer<typeof CompareRequestSchema>
 // CHECKOUT API
 // ============================================================
 export const CheckoutInitiateSchema = z.object({
-  product_id: z.string(),
+  product_id: z.string().uuid(),
   variant_id: z.string().optional(),
   quantity: z.number().int().min(1).max(99).default(1),
   shipping_country: z.string().length(2).optional().default('FR'),
-  agent_session_id: z.string().optional(),
+  /** UUID returned as `agent_query_id` from POST /v1/search — links checkout analytics to the search */
+  agent_session_id: z.string().uuid().optional(),
 })
 
 export type CheckoutInitiateRequest = z.infer<typeof CheckoutInitiateSchema>
@@ -87,6 +88,8 @@ export interface SearchResponse {
   results: ProductResult[]
   total: number
   search_id: string
+  /** DB row id — pass as `agent_session_id` on POST /v1/checkout/initiate when applicable */
+  agent_query_id?: string | undefined
   latency_ms: number
 }
 

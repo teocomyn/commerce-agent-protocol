@@ -148,6 +148,18 @@ checkoutRouter.post('/initiate', zValidator('json', CheckoutInitiateSchema), asy
     }, 502)
   }
 
+  let resolvedAgentQueryId: string | null = null
+  if (agent_session_id) {
+    const aq = await prisma.agentQuery.findFirst({
+      where: {
+        id: agent_session_id,
+        merchantId: product.merchantId,
+      },
+      select: { id: true },
+    })
+    resolvedAgentQueryId = aq?.id ?? null
+  }
+
   // 5. Persist the AgentCheckout record so we can reconcile with orders/create webhooks
   const totalAmount = parseFloat(cart.totalAmount)
   const agentCheckout = await prisma.agentCheckout.create({
@@ -158,7 +170,7 @@ checkoutRouter.post('/initiate', zValidator('json', CheckoutInitiateSchema), asy
       status: 'pending',
       amount: Number.isFinite(totalAmount) ? totalAmount : null,
       currency: cart.currency,
-      agentQueryId: agent_session_id ?? null,
+      agentQueryId: resolvedAgentQueryId,
     },
   })
 

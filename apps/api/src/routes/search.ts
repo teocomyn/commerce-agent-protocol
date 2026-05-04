@@ -8,6 +8,46 @@ import OpenAI from 'openai'
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 const searchRouter = new Hono()
 
+function detectAgentType(userAgent: string): string {
+  const ua = userAgent.toLowerCase()
+  if (ua.includes('claude') || ua.includes('anthropic')) return 'claude'
+  if (ua.includes('chatgpt') || ua.includes('gptbot') || ua.includes('openai')) return 'chatgpt'
+  if (ua.includes('perplexity')) return 'perplexity'
+  if (ua.includes('gemini') || ua.includes('google-extended')) return 'gemini'
+  return 'custom'
+}
+
+interface PersistAgentQueryArgs {
+  merchantId: string
+  agentId: string
+  agentType: string
+  query: string
+  filters: unknown
+  results: number
+  latencyMs: number
+}
+
+async function persistAgentQuery(args: PersistAgentQueryArgs): Promise<string | null> {
+  try {
+    const row = await prisma.agentQuery.create({
+      data: {
+        merchantId: args.merchantId,
+        agentId: args.agentId,
+        agentType: args.agentType,
+        queryText: args.query,
+        filters: args.filters as object,
+        resultsCount: args.results,
+        latencyMs: args.latencyMs,
+      },
+      select: { id: true },
+    })
+    return row.id
+  } catch (err) {
+    console.warn('[Search] Failed to persist agent query:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
 // POST /v1/search
 searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
   const startTime = Date.now()
@@ -28,15 +68,6 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
   if (cached) {
     cached.latency_ms = Date.now() - startTime
     cached.search_id = searchId
-    void persistAgentQuery({
-      id: searchId,
-      agentId,
-      agentType,
-      query,
-      filters,
-      results: cached.results.length,
-      latencyMs: cached.latency_ms,
-    })
     return c.json(cached)
   }
 
@@ -185,18 +216,8 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
   })
 
   const latency = Date.now() - startTime
-  const response: SearchResponse = {
-    results,
-    total,
-    search_id: searchId,
-    latency_ms: latency,
-  }
-
-  // Cache for 2 minutes
-  await cacheSet(cacheKey, response, 120)
-
-  void persistAgentQuery({
-    id: searchId,
+  const agentQueryId = await persistAgentQuery({
+    merchantId: auth.merchantId,
     agentId,
     agentType,
     query,
@@ -205,49 +226,16 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
     latencyMs: latency,
   })
 
+  const response: SearchResponse = {
+    results,
+    total,
+    search_id: searchId,
+    ...(agentQueryId && { agent_query_id: agentQueryId }),
+    latency_ms: latency,
+  }
+
+  await cacheSet(cacheKey, response, 120)
   return c.json(response)
 })
-
-// ============================================================
-// HELPERS
-// ============================================================
-
-function detectAgentType(userAgent: string): string {
-  const ua = userAgent.toLowerCase()
-  if (ua.includes('claude') || ua.includes('anthropic')) return 'claude'
-  if (ua.includes('chatgpt') || ua.includes('gptbot') || ua.includes('openai')) return 'chatgpt'
-  if (ua.includes('perplexity')) return 'perplexity'
-  if (ua.includes('gemini') || ua.includes('google-extended')) return 'gemini'
-  return 'custom'
-}
-
-interface PersistAgentQueryArgs {
-  id: string
-  agentId: string
-  agentType: string
-  query: string
-  filters: unknown
-  results: number
-  latencyMs: number
-}
-
-async function persistAgentQuery(args: PersistAgentQueryArgs): Promise<void> {
-  try {
-    await prisma.agentQuery.create({
-      data: {
-        // The id field is a UUID, so we let Prisma generate one and use the
-        // search_id only as a client-facing identifier returned in the response.
-        agentId: args.agentId,
-        agentType: args.agentType,
-        queryText: args.query,
-        filters: args.filters as object,
-        resultsCount: args.results,
-        latencyMs: args.latencyMs,
-      },
-    })
-  } catch (err) {
-    console.warn('[Search] Failed to persist agent query:', err instanceof Error ? err.message : err)
-  }
-}
 
 export { searchRouter }
