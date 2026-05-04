@@ -28,7 +28,7 @@ export type SearchFilters = z.infer<typeof SearchFiltersSchema>
 // COMPARE API
 // ============================================================
 export const CompareRequestSchema = z.object({
-  product_ids: z.array(z.string()).min(2).max(10),
+  product_ids: z.array(z.string().uuid()).min(2).max(10),
   criteria: z.array(z.enum(['price', 'certifications', 'shipping', 'specs', 'reviews', 'return_policy'])).optional().default(['price', 'certifications', 'shipping', 'specs']),
 })
 

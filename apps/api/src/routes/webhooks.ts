@@ -172,6 +172,7 @@ async function reconcileAgentCheckout(
     where: { id: checkout.id },
     data: {
       status: 'completed',
+      ...(orderId ? { shopifyOrderId: orderId } : {}),
       ...(total != null && { amount: total }),
     },
   })

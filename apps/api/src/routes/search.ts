@@ -111,6 +111,21 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
     paramIdx++
   }
 
+  if (filters?.in_stock === true) {
+    conditions.push(`
+      EXISTS (
+        SELECT 1 FROM jsonb_array_elements(pr.variants::jsonb) v
+        WHERE COALESCE((v->>'inventory_quantity')::int, 0) > 0
+      )`)
+  }
+  if (filters?.in_stock === false) {
+    conditions.push(`
+      NOT EXISTS (
+        SELECT 1 FROM jsonb_array_elements(pr.variants::jsonb) v
+        WHERE COALESCE((v->>'inventory_quantity')::int, 0) > 0
+      )`)
+  }
+
   // Embedding is bound as a parameter rather than concatenated, so we never
   // build SQL from the cosine vector string directly.
   const embeddingParamIdx = paramIdx

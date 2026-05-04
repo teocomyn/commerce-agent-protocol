@@ -160,6 +160,7 @@ model AgentCheckout {
   merchantId        String   @map("merchant_id") @db.Uuid
   productId         String   @map("product_id") @db.Uuid
   shopifyCheckoutId String?  @map("shopify_checkout_id") @db.VarChar(255)
+  shopifyOrderId    String?  @map("shopify_order_id") @db.VarChar(64)
   status            String   @default("pending") @db.VarChar(50)  // pending | completed | abandoned
   amount            Decimal? @db.Decimal(10, 2)
   currency          String?  @db.VarChar(3)

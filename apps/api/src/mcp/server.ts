@@ -60,6 +60,10 @@ const TOOLS: Tool[] = [
           items: { type: 'string' },
           description: 'Required certifications (e.g. ["OEKO-TEX", "GOTS", "B-Corp", "vegan"])',
         },
+        in_stock: {
+          type: 'boolean',
+          description: 'If true, only products with at least one variant with inventory > 0',
+        },
         limit: { type: 'number', description: 'Number of results to return (1-20, default: 5)' },
       },
       required: ['query'],
@@ -126,7 +130,7 @@ const TOOLS: Tool[] = [
 
 async function handleCommerceSearch(args: Record<string, unknown>) {
   const merchantId = getMcpMerchantId()
-  const { query, price_max, price_min, certifications, limit = 5 } = args
+  const { query, price_max, price_min, certifications, limit = 5, in_stock } = args
 
   const embeddingResponse = await openai.embeddings.create({
     model: 'text-embedding-3-small',
@@ -158,6 +162,21 @@ async function handleCommerceSearch(args: Record<string, unknown>) {
     conditions.push(`pe.certifications @> $${paramIdx}::text[]`)
     params.push(certifications)
     paramIdx++
+  }
+
+  if (in_stock === true) {
+    conditions.push(`
+      EXISTS (
+        SELECT 1 FROM jsonb_array_elements(pr.variants::jsonb) v
+        WHERE COALESCE((v->>'inventory_quantity')::int, 0) > 0
+      )`)
+  }
+  if (in_stock === false) {
+    conditions.push(`
+      NOT EXISTS (
+        SELECT 1 FROM jsonb_array_elements(pr.variants::jsonb) v
+        WHERE COALESCE((v->>'inventory_quantity')::int, 0) > 0
+      )`)
   }
 
   const embeddingParamIdx = paramIdx

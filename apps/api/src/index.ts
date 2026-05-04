@@ -96,6 +96,74 @@ app.get('/openapi.json', async (c) => {
             category: { type: 'string' },
           },
         },
+        ProductResult: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            title: { type: 'string' },
+            merchant: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                domain: { type: 'string' },
+                trust_score: { type: 'number' },
+              },
+            },
+            price: {
+              type: 'object',
+              properties: {
+                amount: { type: 'number' },
+                currency: { type: 'string' },
+                was: { type: 'number' },
+              },
+            },
+            specs: { type: 'object', additionalProperties: true },
+            certifications: { type: 'array', items: { type: 'string' } },
+            availability: {
+              type: 'object',
+              properties: {
+                in_stock: { type: 'boolean' },
+                shipping_estimate: { type: 'string' },
+                free_shipping: { type: 'boolean' },
+                return_days: { type: 'integer' },
+              },
+            },
+            images: { type: 'array', items: { type: 'string' } },
+            geo_score: { type: 'number' },
+            checkout_url: { type: 'string', format: 'uri' },
+            use_cases: { type: 'array', items: { type: 'string' } },
+            target_audience: { type: 'array', items: { type: 'string' } },
+            comparison: {
+              type: 'object',
+              properties: {
+                similar_to: { type: 'array', items: { type: 'string' } },
+                differentiators: { type: 'array', items: { type: 'string' } },
+              },
+            },
+          },
+        },
+        SearchResponse: {
+          type: 'object',
+          required: ['results', 'total', 'search_id', 'latency_ms'],
+          properties: {
+            results: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/ProductResult' },
+            },
+            total: { type: 'integer' },
+            search_id: {
+              type: 'string',
+              description: 'Opaque session-style id (e.g. srch_xxxx)',
+            },
+            agent_query_id: {
+              type: 'string',
+              format: 'uuid',
+              description:
+                'Persisted analytics id; send as agent_session_id when initiating checkout',
+            },
+            latency_ms: { type: 'integer' },
+          },
+        },
       },
     },
     paths: {
@@ -104,6 +172,15 @@ app.get('/openapi.json', async (c) => {
           summary: 'Search products',
           description:
             'Search for products using natural language query with optional filters.',
+          parameters: [
+            {
+              name: 'X-Agent-ID',
+              in: 'header',
+              required: false,
+              schema: { type: 'string' },
+              description: 'Optional stable agent identity for analytics',
+            },
+          ],
           requestBody: {
             required: true,
             content: {
@@ -130,7 +207,14 @@ app.get('/openapi.json', async (c) => {
             },
           },
           responses: {
-            '200': { description: 'Search results' },
+            '200': {
+              description: 'Search results',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/SearchResponse' },
+                },
+              },
+            },
             '401': {
               description: 'Unauthorized',
               content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
@@ -212,7 +296,8 @@ app.get('/openapi.json', async (c) => {
                     },
                     agent_session_id: {
                       type: 'string',
-                      description: 'Optional AgentQuery id returned by /v1/search',
+                      format: 'uuid',
+                      description: 'Optional AgentQuery id returned by /v1/search as agent_query_id',
                     },
                   },
                 },
