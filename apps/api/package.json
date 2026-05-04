@@ -20,19 +20,19 @@
   "dependencies": {
     "@cap/db": "workspace:*",
     "@cap/shared": "workspace:*",
-    "@hono/node-server": "^1.13.0",
+    "@hono/node-server": "^1.19.14",
     "@hono/zod-validator": "^0.7.6",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "bullmq": "^5.76.4",
-    "hono": "^4.12.15",
+    "bullmq": "^5.76.5",
+    "hono": "^4.12.16",
     "ioredis": "^5.4.0",
     "openai": "^4.57.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.19.17",
     "concurrently": "^9.2.1",
-    "tsc-alias": "^1.8.0",
+    "tsc-alias": "^1.8.17",
     "tsx": "^4.15.0",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
