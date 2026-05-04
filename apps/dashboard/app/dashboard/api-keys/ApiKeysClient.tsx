@@ -57,10 +57,18 @@ export default function ApiKeysClient({ keys }: ApiKeysClientProps) {
 
       {/* Usage info */}
       <div className="glass" style={{ padding: 16, borderRadius: 12, marginBottom: 24, background: 'var(--accent-muted)', border: '1px solid rgba(108,99,255,0.2)' }}>
-        <code style={{ fontSize: 13, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace' }}>
-          curl -X POST https://api.commerceagent.io/v1/search \<br />
-          &nbsp;&nbsp;-H "X-CAP-Key: cap_live_your_key_here" \<br />
-          &nbsp;&nbsp;-d '{'{"query": "white sneakers", "filters": {"price_max": 120}}'}'
+        <code
+          style={{
+            fontSize: 13,
+            color: 'var(--accent)',
+            fontFamily: 'JetBrains Mono, monospace',
+            whiteSpace: 'pre-wrap',
+            display: 'block',
+          }}
+        >
+          {`curl -X POST https://api.commerceagent.io/v1/search \\
+  -H "X-CAP-Key: cap_live_your_key_here" \\
+  -d '{"query": "white sneakers", "filters": {"price_max": 120}}'`}
         </code>
       </div>
 

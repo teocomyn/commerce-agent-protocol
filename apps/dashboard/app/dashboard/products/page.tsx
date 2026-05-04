@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { prisma } from '@cap/db'
 
 function GeoBar({ score }: { score: number }) {
@@ -148,7 +149,7 @@ export default async function ProductsPage({
               <tr>
                 <td colSpan={6} style={{ padding: '60px 24px', textAlign: 'center', color: 'var(--text-secondary)' }}>
                   No products enriched yet.{' '}
-                  <a href="/" style={{ color: 'var(--accent)' }}>Connect your Shopify store →</a>
+                  <Link href="/" style={{ color: 'var(--accent)' }}>Connect your Shopify store →</Link>
                 </td>
               </tr>
             )}
