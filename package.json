@@ -23,9 +23,9 @@
     "dev:workers": "pnpm --filter=@cap/api dev:workers"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.19.19",
     "prettier": "^3.8.3",
-    "turbo": "^2.9.6",
+    "turbo": "^2.9.14",
     "typescript": "^5.5.0"
   },
   "engines": {
