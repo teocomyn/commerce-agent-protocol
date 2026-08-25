@@ -26,7 +26,7 @@
         "https://cdn.shopify.com/.../campo-white-1.jpg"
       ],
       "geo_score": 87,
-      "checkout_url": "https://api.commerceagent.io/v1/checkout/initiate",
+      "checkout_url": "https://api.cap-protocol.org/v1/checkout/initiate",
       "use_cases": ["everyday", "casual", "minimalist outfit"],
       "target_audience": ["men", "eco-conscious"],
       "comparison": {

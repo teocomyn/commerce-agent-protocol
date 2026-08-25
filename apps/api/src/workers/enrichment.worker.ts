@@ -8,10 +8,17 @@ import {
   type EnrichmentOutput,
   EnrichmentOutputSchema,
 } from '@cap/shared'
-import { bullmqConnection, type EnrichmentJobData } from '../lib/queue.js'
-import { fetchShopifyProduct, decryptToken } from '../lib/shopify.js'
+import { bullmqConnection, sendToDeadLetter, type EnrichmentJobData } from '../lib/queue.js'
+import { fetchShopifyProduct } from '../lib/shopify.js'
+import { getValidShopifyAdminToken } from '../lib/shopify-token.js'
+import { invalidateMerchantSearchCache } from '../lib/redis.js'
+import { extractCommercePolicies } from '../lib/commerce-policies.js'
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  timeout: 20_000,
+  maxRetries: 2,
+})
 
 // ============================================================
 // LLM ENRICHMENT
@@ -113,6 +120,8 @@ async function step1_normalize(product: {
   tags: string
   variants: Array<{ price: string; inventory_quantity: number; weight: number; weight_unit: string }>
   images: Array<{ src: string; alt: string | null }>
+  currency: string
+  metafields: Array<{ key: string; type: string; value: string }>
 }) {
   const description = stripHtml(product.body_html ?? '')
   const tags = product.tags.split(',').map(t => t.trim()).filter(Boolean)
@@ -129,6 +138,8 @@ async function step1_normalize(product: {
     priceMax: isFinite(priceMax) ? priceMax : null,
     totalStock,
     images: product.images,
+    currency: product.currency,
+    ...extractCommercePolicies(product.metafields),
   }
 }
 
@@ -136,6 +147,7 @@ async function step4_geoScore(enriched: EnrichmentOutput, opts: {
   numberOfImages: number
   totalStock: number
   daysSinceUpdate?: number
+  shippingInfoAvailable: boolean
 }) {
   const specs = enriched.specs
   const numberOfSpecs = Object.keys(specs).length
@@ -146,7 +158,7 @@ async function step4_geoScore(enriched: EnrichmentOutput, opts: {
     hasUseCases: enriched.use_cases.length > 0,
     hasCertifications: enriched.certifications.length > 0,
     hasSizeGuide: enriched.size_guide != null && Object.keys(enriched.size_guide).length > 0,
-    hasShippingInfo: false, // Will be updated when shipping data available
+    hasShippingInfo: opts.shippingInfoAvailable,
     numberOfSpecs,
     hasQuantitativeSpecs,
     hasComparisons: enriched.comparison_tags.length > 0,
@@ -170,8 +182,7 @@ export const enrichmentWorker = new Worker<EnrichmentJobData>(
     console.log(`[Worker] Processing product ${shopifyProductId} for ${shopDomain}`)
 
     // Get merchant token
-    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { id: merchantId } })
-    const token = decryptToken(merchant.shopifyToken)
+    const token = await getValidShopifyAdminToken(merchantId)
 
     // Fetch latest product from Shopify
     const shopifyProduct = await fetchShopifyProduct(shopDomain, token, shopifyProductId)
@@ -200,6 +211,7 @@ export const enrichmentWorker = new Worker<EnrichmentJobData>(
         tags: normalized.tags,
         variants: shopifyProduct.variants as object[],
         images: shopifyProduct.images as object[],
+        metafields: shopifyProduct.metafields as object[],
         status: shopifyProduct.status,
       },
       update: {
@@ -210,6 +222,7 @@ export const enrichmentWorker = new Worker<EnrichmentJobData>(
         tags: normalized.tags,
         variants: shopifyProduct.variants as object[],
         images: shopifyProduct.images as object[],
+        metafields: shopifyProduct.metafields as object[],
         status: shopifyProduct.status,
         syncedAt: new Date(),
       },
@@ -242,6 +255,7 @@ export const enrichmentWorker = new Worker<EnrichmentJobData>(
       numberOfImages: normalized.images.length,
       totalStock: normalized.totalStock,
       daysSinceUpdate,
+      shippingInfoAvailable: normalized.shippingInfo != null,
     })
 
     // Upsert enriched product
@@ -252,7 +266,7 @@ export const enrichmentWorker = new Worker<EnrichmentJobData>(
         id, product_raw_id, merchant_id,
         category, subcategory, specs, use_cases, target_audience,
         certifications, care_info, size_guide, comparison_tags,
-        price_min, price_max, currency,
+        price_min, price_max, currency, shipping_info, return_policy,
         geo_score, completeness, embedding,
         enriched_at, version
       ) VALUES (
@@ -265,7 +279,9 @@ export const enrichmentWorker = new Worker<EnrichmentJobData>(
         ${enrichedData.care_info ?? null},
         ${enrichedData.size_guide ? JSON.stringify(enrichedData.size_guide) : null}::jsonb,
         ${enrichedData.comparison_tags}::text[],
-        ${normalized.priceMin}, ${normalized.priceMax}, 'EUR',
+        ${normalized.priceMin}, ${normalized.priceMax}, ${normalized.currency},
+        ${normalized.shippingInfo ? JSON.stringify(normalized.shippingInfo) : null}::jsonb,
+        ${normalized.returnPolicy ? JSON.stringify(normalized.returnPolicy) : null}::jsonb,
         ${geoScore}, ${Math.min(100, Object.keys(enrichedData.specs).length * 10)},
         ${JSON.stringify(embedding)}::vector,
         NOW(), 1
@@ -283,12 +299,17 @@ export const enrichmentWorker = new Worker<EnrichmentJobData>(
         comparison_tags = EXCLUDED.comparison_tags,
         price_min = EXCLUDED.price_min,
         price_max = EXCLUDED.price_max,
+        currency = EXCLUDED.currency,
+        shipping_info = EXCLUDED.shipping_info,
+        return_policy = EXCLUDED.return_policy,
         geo_score = EXCLUDED.geo_score,
         completeness = EXCLUDED.completeness,
         embedding = EXCLUDED.embedding,
         enriched_at = NOW(),
         version = products_enriched.version + 1
     `
+
+    await invalidateMerchantSearchCache(merchantId)
 
     await job.updateProgress(100)
     console.log(`[Worker] ✓ Product ${shopifyProductId} enriched. GEO score: ${geoScore}`)
@@ -303,6 +324,7 @@ export const enrichmentWorker = new Worker<EnrichmentJobData>(
 
 enrichmentWorker.on('failed', (job, err) => {
   console.error(`[Worker] Job ${job?.id} failed:`, err)
+  void sendToDeadLetter('enrichment', job, err)
 })
 
 enrichmentWorker.on('completed', (job, result) => {

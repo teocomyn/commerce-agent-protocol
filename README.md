@@ -88,8 +88,8 @@ API on **`http://localhost:3000`**, dashboard on **`http://localhost:3001`**.
 **Workers** (catalog sync + LLM enrichment) run as separate processes:
 
 ```bash
-pnpm --filter=@cap/api exec tsx watch src/workers/enrichment.worker.ts
-pnpm --filter=@cap/api exec tsx watch src/workers/catalog-sync.worker.ts
+pnpm --filter=@cap/api dev:worker:enrichment
+pnpm --filter=@cap/api dev:worker:catalog
 ```
 
 **Try the API:**
@@ -131,6 +131,8 @@ MCP_MODE=true CAP_MERCHANT_ID=<merchant-uuid> pnpm --filter=@cap/api dev
 CAP is **alpha (v0.1)**. The catalog + search + checkout loop works end-to-end against a real Shopify store; the open spec is being formalized in [`cap-spec/`](./cap-spec). Breaking changes are expected before v1.0.
 
 See the [CHANGELOG](./CHANGELOG.md) for the full release history.
+
+Production runs the API, dashboard, catalog worker, and enrichment worker as separate services. See the [production deployment runbook](./docs/PRODUCTION_DEPLOYMENT.md) and [`render.yaml`](./render.yaml).
 
 ---
 

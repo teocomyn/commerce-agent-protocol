@@ -1,20 +1,22 @@
 import crypto from 'node:crypto'
 import { type NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@cap/db'
+import { getDashboardMerchant } from '@/lib/merchant-context'
+import { getDashboardSession, isSameOriginMutation } from '@/lib/dashboard-session'
 
 // POST /api/keys — create a new API key
 export async function POST(req: NextRequest) {
-  const body = await req.json() as { label?: string; merchantId?: string }
-
-  // TODO: Replace with real session-based merchant ID once auth is set up
-  // For MVP, use the first merchant or a hardcoded test merchant
-  let merchantId = body.merchantId
-  if (!merchantId) {
-    const firstMerchant = await prisma.merchant.findFirst({ select: { id: true } })
-    if (!firstMerchant) {
-      return NextResponse.json({ error: 'No merchant found' }, { status: 404 })
-    }
-    merchantId = firstMerchant.id
+  if (!isSameOriginMutation(req)) {
+    return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })
+  }
+  const session = await getDashboardSession(['OWNER', 'ADMIN'])
+  if (!session) {
+    return NextResponse.json({ error: 'Owner or admin role required' }, { status: 403 })
+  }
+  const body = await req.json() as { label?: string }
+  const merchant = await getDashboardMerchant()
+  if (!merchant) {
+    return NextResponse.json({ error: 'No merchant selected' }, { status: 401 })
   }
 
   // Generate key: cap_live_<40 hex chars>
@@ -24,7 +26,7 @@ export async function POST(req: NextRequest) {
 
   const apiKey = await prisma.apiKey.create({
     data: {
-      merchantId,
+      merchantId: merchant.id,
       keyHash: hash,
       keyPrefix: prefix,
       label: body.label ?? null,
@@ -42,11 +44,13 @@ export async function POST(req: NextRequest) {
 
 // GET /api/keys
 export async function GET() {
-  const firstMerchant = await prisma.merchant.findFirst({ select: { id: true } })
-  if (!firstMerchant) return NextResponse.json([])
+  const session = await getDashboardSession()
+  if (!session) return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
+  const merchant = await getDashboardMerchant()
+  if (!merchant) return NextResponse.json([])
 
   const keys = await prisma.apiKey.findMany({
-    where: { merchantId: firstMerchant.id, revokedAt: null },
+    where: { merchantId: merchant.id, revokedAt: null },
     select: { id: true, keyPrefix: true, label: true, lastUsedAt: true, createdAt: true },
     orderBy: { createdAt: 'desc' },
   })

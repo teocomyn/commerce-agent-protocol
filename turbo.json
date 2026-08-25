@@ -16,8 +16,7 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "tests/**", "*.config.*"],
-      "outputs": ["coverage/**"]
+      "inputs": ["src/**", "tests/**", "*.config.*"]
     },
     "clean": {
       "cache": false

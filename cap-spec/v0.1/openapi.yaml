@@ -16,7 +16,7 @@ info:
     url: https://github.com/teocomyn/commerce-agent-protocol
 
 servers:
-  - url: https://api.commerceagent.io
+  - url: https://api.cap-protocol.org
     description: Reference production server
   - url: http://localhost:3000
     description: Local reference implementation
@@ -230,6 +230,10 @@ components:
         results:    { type: array, items: { $ref: '#/components/schemas/ProductResult' } }
         total:      { type: integer }
         search_id:  { type: string }
+        agent_query_id:
+          type: string
+          format: uuid
+          description: Persisted analytics id; pass as `agent_session_id` when initiating checkout.
         latency_ms: { type: integer }
 
     CompareRequest:
@@ -245,7 +249,7 @@ components:
           type: array
           items:
             type: string
-            enum: [price, certifications, shipping, specs, reviews, return_policy]
+            enum: [price, certifications, shipping, specs, return_policy]
 
     CompareResponse:
       type: object

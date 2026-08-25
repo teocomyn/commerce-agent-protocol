@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import StoreConnectForm from './StoreConnectForm'
 
 export default function HomePage() {
   return (
@@ -31,20 +32,9 @@ export default function HomePage() {
           </p>
         </div>
 
-        {/* CTA */}
+        <StoreConnectForm />
+
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          <Link
-            href="/api/shopify/install"
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 8,
-              background: 'linear-gradient(135deg, #6c63ff, #a78bfa)',
-              color: 'white', padding: '14px 28px', borderRadius: 10,
-              fontWeight: 600, fontSize: 16, textDecoration: 'none',
-              transition: 'opacity 0.2s',
-            }}
-          >
-            🛍️ Connect Shopify Store
-          </Link>
           <Link
             href="/dashboard"
             style={{

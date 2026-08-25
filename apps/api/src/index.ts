@@ -60,7 +60,7 @@ app.get('/openapi.json', async (c) => {
     },
     servers: [
       {
-        url: process.env.SHOPIFY_APP_URL ?? 'https://api.commerceagent.io',
+        url: process.env.SHOPIFY_APP_URL ?? 'https://api.cap-protocol.org',
         description: 'Production',
       },
     ],
@@ -251,7 +251,6 @@ app.get('/openapi.json', async (c) => {
                           'certifications',
                           'shipping',
                           'specs',
-                          'reviews',
                           'return_policy',
                         ],
                       },
@@ -388,7 +387,7 @@ app.notFound((c) => c.json<CAPError>({
 // START SERVER
 // ============================================================
 
-const port = parseInt(process.env.API_PORT ?? '3000')
+const port = parseInt(process.env.PORT ?? process.env.API_PORT ?? '3000')
 
 // Only start HTTP server if not in MCP mode
 if (process.env.MCP_MODE !== 'true') {

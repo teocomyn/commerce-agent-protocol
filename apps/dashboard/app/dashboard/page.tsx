@@ -1,4 +1,6 @@
+import Link from 'next/link'
 import { prisma } from '@cap/db'
+import { getDashboardMerchant } from '@/lib/merchant-context'
 
 interface StatCardProps {
   label: string
@@ -24,15 +26,12 @@ function StatCard({ label, value, sub, icon, color = '#6c63ff' }: StatCardProps)
 }
 
 export default async function DashboardOverview() {
-  const firstMerchant = await prisma.merchant.findFirst({
-    orderBy: { createdAt: 'asc' },
-    select: { id: true },
-  })
-  const storeScope =
-    firstMerchant != null ? { merchantId: firstMerchant.id } : {}
+  const merchant = await getDashboardMerchant()
+  const storeScope = {
+    merchantId: merchant?.id ?? '00000000-0000-0000-0000-000000000000',
+  }
 
-  const [merchantCount, productCount, geoAgg, queryCount] = await Promise.all([
-    prisma.merchant.count(),
+  const [productCount, geoAgg, queryCount] = await Promise.all([
     prisma.productEnriched.count({
       where: { deletedAt: null, ...storeScope },
     }),
@@ -41,7 +40,7 @@ export default async function DashboardOverview() {
       _avg: { geoScore: true },
     }),
     prisma.agentQuery.count({
-      where: firstMerchant ? { merchantId: firstMerchant.id } : {},
+      where: storeScope,
     }),
   ])
 
@@ -62,12 +61,13 @@ export default async function DashboardOverview() {
         <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', margin: 0 }}>Overview</h1>
         <p style={{ color: 'var(--text-secondary)', marginTop: 4, fontSize: 14 }}>
           Your CAP infrastructure — real-time status
+          {merchant ? ` for ${merchant.shopifyDomain}` : ''}
         </p>
       </div>
 
       {/* Stats grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
-        <StatCard label="Connected Merchants" value={merchantCount} icon="🏪" />
+        <StatCard label="Connected Store" value={merchant ? 1 : 0} icon="🏪" />
         <StatCard label="Enriched Products" value={productCount.toLocaleString()} icon="📦" color="#22c55e" />
         <StatCard label="Avg. GEO Score" value={`${avgScore}/100`} icon="⭐" color={avgScore >= 70 ? '#22c55e' : avgScore >= 40 ? '#f59e0b' : '#ef4444'} />
         <StatCard label="Agent Queries" value={queryCount.toLocaleString()} icon="🤖" color="#a78bfa" />
@@ -105,7 +105,7 @@ export default async function DashboardOverview() {
             {recentProducts.length === 0 && (
               <tr>
                 <td colSpan={4} style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
-                  No products yet. <a href="/shopify/install" style={{ color: 'var(--accent)' }}>Connect your Shopify store →</a>
+                  No products yet. <Link href="/" style={{ color: 'var(--accent)' }}>Connect your Shopify store →</Link>
                 </td>
               </tr>
             )}

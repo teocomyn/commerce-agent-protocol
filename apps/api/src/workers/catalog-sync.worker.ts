@@ -1,13 +1,14 @@
 import { Worker } from 'bullmq'
 import { prisma } from '@cap/db'
-import { bullmqConnection, enrichmentQueue, type CatalogSyncJobData } from '../lib/queue.js'
-import { fetchShopifyProducts, decryptToken } from '../lib/shopify.js'
+import { bullmqConnection, enrichmentQueue, sendToDeadLetter, type CatalogSyncJobData } from '../lib/queue.js'
+import { fetchShopifyProducts } from '../lib/shopify.js'
+import { getValidShopifyAdminToken } from '../lib/shopify-token.js'
 
 export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
   'catalog-sync',
   async (job) => {
     const { merchantId, shopDomain, cursor } = job.data
-    const token = decryptToken(job.data.shopifyToken)
+    const token = await getValidShopifyAdminToken(merchantId)
 
     console.log(`[CatalogSync] Starting sync for ${shopDomain} (cursor: ${cursor ?? 'start'})`)
 
@@ -32,7 +33,8 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
         },
         opts: {
           priority: 3, // Lower priority than webhook-triggered jobs
-          jobId: `${merchantId}-${product.id}`, // Deduplicate
+          jobId: `full-sync-${merchantId}-${product.id}-${job.id}`,
+          removeOnComplete: true,
         },
       }))
 
@@ -50,15 +52,15 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
     } while (pageInfo)
 
     // Update merchant settings with sync status
-    await prisma.merchant.update({
-      where: { id: merchantId },
-      data: {
-        settings: {
-          lastFullSync: new Date().toISOString(),
-          totalProducts: totalProcessed,
-        },
-      },
-    })
+    await prisma.$executeRaw`
+      UPDATE merchants
+      SET settings = COALESCE(settings, '{}'::jsonb) || ${JSON.stringify({
+        lastFullSync: new Date().toISOString(),
+        totalProducts: totalProcessed,
+      })}::jsonb,
+      updated_at = NOW()
+      WHERE id = ${merchantId}::uuid
+    `
 
     await job.updateProgress(100)
     console.log(`[CatalogSync] ✓ ${shopDomain}: ${totalProcessed} products queued for enrichment`)
@@ -73,6 +75,7 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
 
 catalogSyncWorker.on('failed', (job, err) => {
   console.error(`[CatalogSync] Job ${job?.id} failed:`, err)
+  void sendToDeadLetter('catalog-sync', job, err)
 })
 
 console.log('[Worker] Catalog sync worker started')

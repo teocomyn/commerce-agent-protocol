@@ -29,6 +29,30 @@ export const catalogSyncQueue = new Queue('catalog-sync', {
   },
 })
 
+export const deadLetterQueue = new Queue('dead-letter', {
+  connection,
+  defaultJobOptions: {
+    removeOnComplete: { count: 5_000 },
+    removeOnFail: { count: 5_000 },
+  },
+})
+
+export async function sendToDeadLetter(
+  sourceQueue: string,
+  job: Job | undefined,
+  error: Error,
+): Promise<void> {
+  if (!job || job.attemptsMade < (job.opts.attempts ?? 1)) return
+  await deadLetterQueue.add(`${sourceQueue}-failed`, {
+    sourceQueue,
+    sourceJobId: job.id,
+    data: job.data,
+    attemptsMade: job.attemptsMade,
+    failedReason: error.message,
+    failedAt: new Date().toISOString(),
+  })
+}
+
 // ============================================================
 // JOB TYPES
 // ============================================================
@@ -43,7 +67,6 @@ export interface EnrichmentJobData {
 export interface CatalogSyncJobData {
   merchantId: string
   shopDomain: string
-  shopifyToken: string
   cursor?: string // Pagination cursor for resume
 }
 
@@ -52,14 +75,16 @@ export interface CatalogSyncJobData {
 // ============================================================
 
 export async function getQueueStats() {
-  const [enrichmentCounts, catalogCounts] = await Promise.all([
+  const [enrichmentCounts, catalogCounts, deadLetterCounts] = await Promise.all([
     enrichmentQueue.getJobCounts('waiting', 'active', 'completed', 'failed'),
     catalogSyncQueue.getJobCounts('waiting', 'active', 'completed', 'failed'),
+    deadLetterQueue.getJobCounts('waiting', 'active', 'completed', 'failed'),
   ])
 
   return {
     enrichment: enrichmentCounts,
     catalogSync: catalogCounts,
+    deadLetter: deadLetterCounts,
   }
 }
 

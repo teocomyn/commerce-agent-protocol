@@ -16,45 +16,123 @@ datasource db {
 // MERCHANTS
 // ============================================================
 model Merchant {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  shopifyDomain   String   @unique @map("shopify_domain") @db.VarChar(255)
-  shopifyToken    String   @map("shopify_token") // Admin API token, encrypted AES-256-GCM
-  storefrontToken String?  @map("storefront_token") // Storefront API token, encrypted AES-256-GCM (Cart API)
-  plan            String   @default("free") @db.VarChar(50)
-  settings        Json     @default("{}") @db.JsonB
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shopifyDomain         String    @unique @map("shopify_domain") @db.VarChar(255)
+  shopifyToken          String?   @map("shopify_token") // Offline Admin API token, encrypted AES-256-GCM
+  shopifyRefreshToken   String?   @map("shopify_refresh_token") // Offline refresh token, encrypted AES-256-GCM
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at") @db.Timestamptz
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at") @db.Timestamptz
+  grantedScopes         String[]  @default([]) @map("granted_scopes")
+  storefrontToken       String?   @map("storefront_token") // Storefront API token, encrypted AES-256-GCM (Cart API)
+  shopCurrency          String    @default("EUR") @map("shop_currency") @db.VarChar(3)
+  uninstalledAt         DateTime? @map("uninstalled_at") @db.Timestamptz
+  plan                  String    @default("free") @db.VarChar(50)
+  settings              Json      @default("{}") @db.JsonB
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  productsRaw      ProductRaw[]
-  productsEnriched ProductEnriched[]
-  apiKeys          ApiKey[]
-  agentCheckouts   AgentCheckout[]
-  agentQueries     AgentQuery[]
+  productsRaw          ProductRaw[]
+  productsEnriched     ProductEnriched[]
+  apiKeys              ApiKey[]
+  agentCheckouts       AgentCheckout[]
+  agentQueries         AgentQuery[]
+  members              MerchantMember[]
+  dashboardLoginTokens DashboardLoginToken[]
+  webhookEvents        WebhookEvent[]
 
   @@map("merchants")
+}
+
+enum MerchantRole {
+  OWNER
+  ADMIN
+  ANALYST
+}
+
+model User {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  externalId String   @unique @map("external_id") @db.VarChar(255)
+  email      String?  @db.VarChar(320)
+  name       String?  @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  memberships          MerchantMember[]
+  dashboardLoginTokens DashboardLoginToken[]
+
+  @@map("users")
+}
+
+model MerchantMember {
+  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String       @map("user_id") @db.Uuid
+  merchantId String       @map("merchant_id") @db.Uuid
+  role       MerchantRole @default(ANALYST)
+  revokedAt  DateTime?    @map("revoked_at") @db.Timestamptz
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, merchantId])
+  @@index([merchantId])
+  @@map("merchant_members")
+}
+
+model DashboardLoginToken {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
+  userId     String    @map("user_id") @db.Uuid
+  merchantId String    @map("merchant_id") @db.Uuid
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("dashboard_login_tokens")
+}
+
+model WebhookEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  webhookId   String    @unique @map("webhook_id") @db.VarChar(255)
+  merchantId  String    @map("merchant_id") @db.Uuid
+  topic       String    @db.VarChar(100)
+  status      String    @default("processing") @db.VarChar(30)
+  error       String?
+  receivedAt  DateTime  @default(now()) @map("received_at") @db.Timestamptz
+  processedAt DateTime? @map("processed_at") @db.Timestamptz
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, receivedAt])
+  @@map("webhook_events")
 }
 
 // ============================================================
 // RAW PRODUCTS (Shopify mirror)
 // ============================================================
 model ProductRaw {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  merchantId  String   @map("merchant_id") @db.Uuid
-  shopifyId   BigInt   @map("shopify_id")
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  merchantId  String    @map("merchant_id") @db.Uuid
+  shopifyId   BigInt    @map("shopify_id")
   title       String
   description String?
-  vendor      String?  @db.VarChar(255)
-  productType String?  @map("product_type") @db.VarChar(255)
+  vendor      String?   @db.VarChar(255)
+  productType String?   @map("product_type") @db.VarChar(255)
   tags        String[]
-  variants    Json     @db.JsonB  // price, SKU, stock, options
-  images      Json?    @db.JsonB
-  metafields  Json?    @db.JsonB
-  status      String?  @db.VarChar(50)
-  syncedAt    DateTime @default(now()) @map("synced_at") @db.Timestamptz
+  variants    Json      @db.JsonB // price, SKU, stock, options
+  images      Json?     @db.JsonB
+  metafields  Json?     @db.JsonB
+  status      String?   @db.VarChar(50)
+  syncedAt    DateTime  @default(now()) @map("synced_at") @db.Timestamptz
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
 
-  merchant         Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  productEnriched  ProductEnriched?
+  merchant        Merchant         @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  productEnriched ProductEnriched?
 
   @@unique([merchantId, shopifyId])
   @@map("products_raw")
@@ -64,14 +142,14 @@ model ProductRaw {
 // ENRICHED PRODUCTS (agent-ready)
 // ============================================================
 model ProductEnriched {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  productRawId String   @unique @map("product_raw_id") @db.Uuid
-  merchantId   String   @map("merchant_id") @db.Uuid
+  id           String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productRawId String @unique @map("product_raw_id") @db.Uuid
+  merchantId   String @map("merchant_id") @db.Uuid
 
   // Structured data (LLM-generated)
   category       String?  @db.VarChar(255)
   subcategory    String?  @db.VarChar(255)
-  specs          Json     @db.JsonB     // {"material": "cotton", ...}
+  specs          Json     @db.JsonB // {"material": "cotton", ...}
   useCases       String[] @map("use_cases")
   targetAudience String[] @map("target_audience")
   certifications String[]
@@ -87,14 +165,14 @@ model ProductEnriched {
   returnPolicy Json?    @map("return_policy") @db.JsonB
 
   // GEO scoring
-  geoScore    Float  @default(0) @map("geo_score")
+  geoScore     Float @default(0) @map("geo_score")
   completeness Float @default(0)
 
   // Vector embedding (1536 dims — text-embedding-3-small)
   // Stored as Unsupported because Prisma doesn't natively support pgvector
   // We use raw SQL for vector operations
-  enrichedAt DateTime @default(now()) @map("enriched_at") @db.Timestamptz
-  version    Int      @default(1)
+  enrichedAt DateTime  @default(now()) @map("enriched_at") @db.Timestamptz
+  version    Int       @default(1)
   deletedAt  DateTime? @map("deleted_at") @db.Timestamptz
 
   productRaw     ProductRaw      @relation(fields: [productRawId], references: [id], onDelete: Cascade)
@@ -113,8 +191,8 @@ model ProductEnriched {
 model ApiKey {
   id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   merchantId String    @map("merchant_id") @db.Uuid
-  keyHash    String    @unique @map("key_hash")  // SHA-256 of the actual key
-  keyPrefix  String    @map("key_prefix") @db.VarChar(16)  // "cap_live_xxxx..." for display
+  keyHash    String    @unique @map("key_hash") // SHA-256 of the actual key
+  keyPrefix  String    @map("key_prefix") @db.VarChar(16) // "cap_live_xxxx..." for display
   label      String?   @db.VarChar(255)
   lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz
   revokedAt  DateTime? @map("revoked_at") @db.Timestamptz
@@ -132,7 +210,7 @@ model AgentQuery {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   merchantId      String?  @map("merchant_id") @db.Uuid
   agentId         String   @map("agent_id") @db.VarChar(255)
-  agentType       String?  @map("agent_type") @db.VarChar(100)  // chatgpt | perplexity | gemini | custom
+  agentType       String?  @map("agent_type") @db.VarChar(100) // chatgpt | perplexity | gemini | custom
   queryText       String?  @map("query_text")
   filters         Json?    @db.JsonB
   resultsCount    Int?     @map("results_count")
@@ -141,7 +219,7 @@ model AgentQuery {
   latencyMs       Int?     @map("latency_ms")
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
 
-  merchant        Merchant?       @relation(fields: [merchantId], references: [id], onDelete: SetNull)
+  merchant        Merchant?        @relation(fields: [merchantId], references: [id], onDelete: SetNull)
   productEnriched ProductEnriched? @relation(fields: [selectedProduct], references: [id])
   agentCheckouts  AgentCheckout[]
 
@@ -161,14 +239,15 @@ model AgentCheckout {
   productId         String   @map("product_id") @db.Uuid
   shopifyCheckoutId String?  @map("shopify_checkout_id") @db.VarChar(255)
   shopifyOrderId    String?  @map("shopify_order_id") @db.VarChar(64)
-  status            String   @default("pending") @db.VarChar(50)  // pending | completed | abandoned
+  trackingToken     String   @unique @map("tracking_token") @db.VarChar(64)
+  status            String   @default("pending") @db.VarChar(50) // pending | completed | abandoned
   amount            Decimal? @db.Decimal(10, 2)
   currency          String?  @db.VarChar(3)
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
 
-  agentQuery      AgentQuery?      @relation(fields: [agentQueryId], references: [id])
-  merchant        Merchant         @relation(fields: [merchantId], references: [id])
-  productEnriched ProductEnriched  @relation(fields: [productId], references: [id])
+  agentQuery      AgentQuery?     @relation(fields: [agentQueryId], references: [id])
+  merchant        Merchant        @relation(fields: [merchantId], references: [id])
+  productEnriched ProductEnriched @relation(fields: [productId], references: [id])
 
   @@map("agent_checkouts")
 }

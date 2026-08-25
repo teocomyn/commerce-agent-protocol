@@ -1,11 +1,15 @@
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
 import { prisma } from '@cap/db'
 import { SearchRequestSchema, type SearchResponse } from '@cap/shared'
 import { cacheGet, cacheSet } from '../lib/redis.js'
 import OpenAI from 'openai'
+import { capJsonValidator } from '../lib/validation.js'
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  timeout: 10_000,
+  maxRetries: 2,
+})
 const searchRouter = new Hono()
 
 function detectAgentType(userAgent: string): string {
@@ -49,7 +53,7 @@ async function persistAgentQuery(args: PersistAgentQueryArgs): Promise<string | 
 }
 
 // POST /v1/search
-searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
+searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
   const startTime = Date.now()
   const auth = c.get('auth')
   const body = c.req.valid('json')
@@ -66,19 +70,43 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
   const cacheKey = `search:${auth.merchantId}:${JSON.stringify({ query, filters, limit, sort })}`
   const cached = await cacheGet<SearchResponse>(cacheKey)
   if (cached) {
-    cached.latency_ms = Date.now() - startTime
-    cached.search_id = searchId
-    return c.json(cached)
+    const latency = Date.now() - startTime
+    const agentQueryId = await persistAgentQuery({
+      merchantId: auth.merchantId,
+      agentId,
+      agentType,
+      query,
+      filters,
+      results: cached.results.length,
+      latencyMs: latency,
+    })
+
+    const { agent_query_id: _cachedAgentQueryId, ...cachedWithoutSession } = cached
+
+    return c.json({
+      ...cachedWithoutSession,
+      search_id: searchId,
+      ...(agentQueryId && { agent_query_id: agentQueryId }),
+      latency_ms: latency,
+    })
   }
 
-  // Generate query embedding
-  const embeddingResponse = await openai.embeddings.create({
-    model: 'text-embedding-3-small',
-    input: query,
-    dimensions: 1536,
-  })
-  const queryEmbedding = embeddingResponse.data[0]?.embedding ?? []
-  const embeddingStr = `[${queryEmbedding.join(',')}]`
+  // Relevance uses embeddings when available, with a lexical fallback so an
+  // OpenAI outage does not take product discovery offline.
+  let embeddingStr: string | null = null
+  if (sort === 'relevance') {
+    try {
+      const embeddingResponse = await openai.embeddings.create({
+        model: 'text-embedding-3-small',
+        input: query,
+        dimensions: 1536,
+      })
+      const queryEmbedding = embeddingResponse.data[0]?.embedding ?? []
+      if (queryEmbedding.length === 1536) embeddingStr = `[${queryEmbedding.join(',')}]`
+    } catch (error) {
+      console.warn('[Search] Embedding unavailable, using lexical fallback:', error instanceof Error ? error.message : error)
+    }
+  }
 
   // Build SQL filters with bound parameters (no string concat for user input)
   const conditions: string[] = ['pe.deleted_at IS NULL']
@@ -110,6 +138,20 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
     params.push(`%${filters.category}%`)
     paramIdx++
   }
+  if (filters?.currency) {
+    conditions.push(`pe.currency = $${paramIdx}`)
+    params.push(filters.currency)
+    paramIdx++
+  }
+  if (filters?.shipping_country) {
+    conditions.push(`(
+      pe.shipping_info IS NULL OR
+      pe.shipping_info->'countries' IS NULL OR
+      pe.shipping_info->'countries' ? $${paramIdx}
+    )`)
+    params.push(filters.shipping_country.toUpperCase())
+    paramIdx++
+  }
 
   if (filters?.in_stock === true) {
     conditions.push(`
@@ -128,15 +170,28 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
 
   // Embedding is bound as a parameter rather than concatenated, so we never
   // build SQL from the cosine vector string directly.
-  const embeddingParamIdx = paramIdx
-  params.push(embeddingStr)
-  paramIdx++
+  let embeddingParamIdx: number | null = null
+  if (embeddingStr) {
+    embeddingParamIdx = paramIdx
+    params.push(embeddingStr)
+    paramIdx++
+  } else if (sort === 'relevance') {
+    conditions.push(`(
+      pr.title ILIKE $${paramIdx} OR
+      COALESCE(pr.description, '') ILIKE $${paramIdx} OR
+      COALESCE(pe.category, '') ILIKE $${paramIdx}
+    )`)
+    params.push(`%${query.trim()}%`)
+    paramIdx++
+  }
 
   const orderBy =
     sort === 'price_asc' ? 'pe.price_min ASC'
     : sort === 'price_desc' ? 'pe.price_min DESC'
     : sort === 'geo_score' ? 'pe.geo_score DESC'
-    : `1 - (pe.embedding <=> $${embeddingParamIdx}::vector) DESC`
+    : embeddingParamIdx
+      ? `1 - (pe.embedding <=> $${embeddingParamIdx}::vector) DESC`
+      : 'pe.geo_score DESC, pe.enriched_at DESC'
 
   const limitParamIdx = paramIdx
   params.push(limit)
@@ -178,7 +233,7 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
        pe.shipping_info, pe.return_policy,
        m.id as merchant_id, m.shopify_domain, m.plan as merchant_plan,
        pr.title as raw_title, pr.images as raw_images, pr.variants as raw_variants,
-       1 - (pe.embedding <=> $${embeddingParamIdx}::vector) AS similarity,
+       ${embeddingParamIdx ? `1 - (pe.embedding <=> $${embeddingParamIdx}::vector)` : '0::double precision'} AS similarity,
        COUNT(*) OVER() as total_count
      FROM products_enriched pe
      JOIN products_raw pr ON pr.id = pe.product_raw_id
@@ -190,7 +245,7 @@ searchRouter.post('/', zValidator('json', SearchRequestSchema), async (c) => {
   )
 
   const total = rawResults.length > 0 ? parseInt(rawResults[0]?.total_count ?? '0') : 0
-  const checkoutBase = process.env.SHOPIFY_APP_URL ?? 'https://api.commerceagent.io'
+  const checkoutBase = process.env.SHOPIFY_APP_URL ?? 'https://api.cap-protocol.org'
 
   // Format results
   const results = rawResults.map(row => {

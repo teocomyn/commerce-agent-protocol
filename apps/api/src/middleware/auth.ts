@@ -43,16 +43,19 @@ export const authMiddleware = createMiddleware(async (c, next) => {
     }, 401)
   }
 
-  // Check cache first to avoid DB hit on every request
-  const cacheKey = `apikey:${apiKey}`
+  const hash = crypto.createHash('sha256').update(apiKey).digest('hex')
+
+  // Cache keys never contain the bearer secret and can be invalidated by hash.
+  const cacheKey = `apikey:${hash}`
   let authData = await cacheGet<AuthContext & { plan: string }>(cacheKey)
 
   if (!authData) {
-    // Hash the key and look up in DB
-    const hash = crypto.createHash('sha256').update(apiKey).digest('hex')
-
     const apiKeyRecord = await prisma.apiKey.findFirst({
-      where: { keyHash: hash, revokedAt: null },
+      where: {
+        keyHash: hash,
+        revokedAt: null,
+        merchant: { uninstalledAt: null },
+      },
       include: { merchant: { select: { id: true, plan: true } } },
     })
 
@@ -81,7 +84,7 @@ export const authMiddleware = createMiddleware(async (c, next) => {
   // Rate limiting per API key
   const maxRequests = RATE_LIMITS[authData.plan] ?? 100
   const { allowed, remaining, resetMs } = await rateLimit(
-    `rl:${apiKey}`,
+    `rl:${hash}`,
     60_000, // 1 minute window
     maxRequests
   )

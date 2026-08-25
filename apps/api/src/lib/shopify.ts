@@ -1,6 +1,64 @@
 import crypto from 'node:crypto'
 
-const SHOPIFY_API_VERSION = '2024-10'
+export const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION ?? '2026-07'
+const SHOPIFY_TIMEOUT_MS = Number(process.env.SHOPIFY_TIMEOUT_MS ?? 10_000)
+
+async function fetchWithRetry(
+  input: string,
+  init: RequestInit,
+  attempts = 3,
+): Promise<Response> {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const response = await fetch(input, {
+        ...init,
+        signal: AbortSignal.timeout(SHOPIFY_TIMEOUT_MS),
+      })
+      if (response.status !== 429 && response.status < 500) return response
+      if (attempt === attempts) return response
+      const retryAfter = Number(response.headers.get('retry-after') ?? 0)
+      await new Promise((resolve) => setTimeout(resolve, retryAfter > 0 ? retryAfter * 1_000 : attempt * 500))
+    } catch (error) {
+      lastError = error
+      if (attempt === attempts) throw error
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500))
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Shopify request failed')
+}
+
+interface ShopifyGraphqlEnvelope<T> {
+  data?: T
+  errors?: Array<{ message: string }>
+}
+
+async function adminGraphql<T>(
+  shop: string,
+  token: string,
+  query: string,
+  variables: Record<string, unknown> = {},
+): Promise<T> {
+  const response = await fetchWithRetry(
+    `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`,
+    {
+      method: 'POST',
+      headers: {
+        'X-Shopify-Access-Token': token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query, variables }),
+    },
+  )
+  const body = (await response.json().catch(() => ({}))) as ShopifyGraphqlEnvelope<T>
+  if (!response.ok || body.errors?.length || !body.data) {
+    throw new Error(
+      body.errors?.map((error) => error.message).join('; ') ||
+      `Shopify GraphQL HTTP ${response.status}: ${response.statusText}`,
+    )
+  }
+  return body.data
+}
 
 // ============================================================
 // HMAC VERIFICATION
@@ -16,7 +74,25 @@ export function verifyShopifyWebhook(rawBody: string, hmacHeader: string | undef
     .update(rawBody, 'utf8')
     .digest('base64')
 
-  return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(hmacHeader))
+  const expected = Buffer.from(digest)
+  const received = Buffer.from(hmacHeader)
+  return expected.length === received.length && crypto.timingSafeEqual(expected, received)
+}
+
+export function verifyShopifyOAuthHmac(params: Record<string, string>): boolean {
+  const secret = process.env.SHOPIFY_API_SECRET
+  const providedHmac = params['hmac']
+  if (!secret || !providedHmac) return false
+
+  const message = Object.entries(params)
+    .filter(([key]) => key !== 'hmac' && key !== 'signature')
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('&')
+  const expectedHmac = crypto.createHmac('sha256', secret).update(message).digest('hex')
+  const expected = Buffer.from(expectedHmac)
+  const received = Buffer.from(providedHmac)
+  return expected.length === received.length && crypto.timingSafeEqual(expected, received)
 }
 
 // ============================================================
@@ -33,41 +109,128 @@ export function buildInstallUrl(shop: string, state: string): string {
     scope: scopes ?? '',
     redirect_uri: redirectUri,
     state,
-    'grant_options[]': 'per-user',
   })
 
   return `https://${shop}/admin/oauth/authorize?${params.toString()}`
 }
 
+export function isValidShopDomain(shop: string): boolean {
+  return /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop)
+}
+
+export async function fetchShopConfiguration(shop: string, token: string): Promise<{
+  name: string
+  currency: string
+}> {
+  const data = await adminGraphql<{ shop: { name: string; currencyCode: string } }>(
+    shop,
+    token,
+    'query CapShopConfiguration { shop { name currencyCode } }',
+  )
+  return { name: data.shop.name, currency: data.shop.currencyCode }
+}
+
+export interface ShopifyOfflineTokenResult {
+  accessToken: string
+  refreshToken: string | null
+  accessTokenExpiresAt: Date | null
+  refreshTokenExpiresAt: Date | null
+  grantedScopes: string[]
+}
+
+function parseTokenResponse(data: {
+  access_token: string
+  refresh_token?: string
+  expires_in?: number
+  refresh_token_expires_in?: number
+  scope?: string
+}): ShopifyOfflineTokenResult {
+  const now = Date.now()
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token ?? null,
+    accessTokenExpiresAt: data.expires_in ? new Date(now + data.expires_in * 1_000) : null,
+    refreshTokenExpiresAt: data.refresh_token_expires_in
+      ? new Date(now + data.refresh_token_expires_in * 1_000)
+      : null,
+    grantedScopes: (data.scope ?? '').split(',').map((scope) => scope.trim()).filter(Boolean),
+  }
+}
+
 export async function exchangeCodeForToken(
   shop: string,
   code: string
-): Promise<string> {
+): Promise<ShopifyOfflineTokenResult> {
   const url = `https://${shop}/admin/oauth/access_token`
-  const response = await fetch(url, {
+  const params = new URLSearchParams({
+    client_id: process.env.SHOPIFY_API_KEY ?? '',
+    client_secret: process.env.SHOPIFY_API_SECRET ?? '',
+    code,
+    expiring: '1',
+  })
+  const response = await fetchWithRetry(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_id: process.env.SHOPIFY_API_KEY,
-      client_secret: process.env.SHOPIFY_API_SECRET,
-      code,
-    }),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body: params,
   })
 
   if (!response.ok) {
     throw new Error(`Failed to exchange code: ${response.statusText}`)
   }
 
-  const data = (await response.json()) as { access_token: string }
-  return data.access_token
+  const data = (await response.json()) as {
+    access_token: string
+    refresh_token?: string
+    expires_in?: number
+    refresh_token_expires_in?: number
+    scope?: string
+  }
+  return parseTokenResponse(data)
+}
+
+export async function refreshOfflineAccessToken(
+  shop: string,
+  refreshToken: string,
+): Promise<ShopifyOfflineTokenResult> {
+  const params = new URLSearchParams({
+    client_id: process.env.SHOPIFY_API_KEY ?? '',
+    client_secret: process.env.SHOPIFY_API_SECRET ?? '',
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+  })
+  const response = await fetchWithRetry(`https://${shop}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body: params,
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to refresh Shopify token: ${response.status} ${response.statusText}`)
+  }
+  return parseTokenResponse(await response.json() as {
+    access_token: string
+    refresh_token?: string
+    expires_in?: number
+    refresh_token_expires_in?: number
+    scope?: string
+  })
+}
+
+export function validateGrantedScopes(grantedScopes: string[]): string[] {
+  const requested = (process.env.SHOPIFY_SCOPES ?? '')
+    .split(',')
+    .map((scope) => scope.trim())
+    .filter(Boolean)
+  const granted = new Set(grantedScopes)
+  return requested.filter((scope) => !granted.has(scope))
 }
 
 // ============================================================
-// PRODUCT FETCHING (Admin REST API)
+// PRODUCT FETCHING (Admin GraphQL API)
 // ============================================================
 
 export interface ShopifyVariant {
   id: number
+  inventory_item_id: number | null
   title: string
   price: string
   sku: string | null
@@ -100,6 +263,8 @@ export interface ShopifyProduct {
   images: ShopifyImage[]
   created_at: string
   updated_at: string
+  currency: string
+  metafields: Array<{ namespace: string; key: string; type: string; value: string }>
 }
 
 export interface ShopifyProductsPage {
@@ -112,42 +277,20 @@ export async function fetchShopifyProducts(
   token: string,
   pageInfo?: string
 ): Promise<ShopifyProductsPage> {
-  const params = new URLSearchParams({
-    limit: '250',
-    fields: 'id,title,body_html,vendor,product_type,tags,status,variants,images,created_at,updated_at',
-  })
-
-  if (pageInfo) {
-    params.set('page_info', pageInfo)
-  }
-
-  const url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/products.json?${params.toString()}`
-
-  const response = await fetch(url, {
-    headers: {
-      'X-Shopify-Access-Token': token,
-      'Content-Type': 'application/json',
-    },
-  })
-
-  if (!response.ok) {
-    throw new Error(`Shopify API error: ${response.status} ${response.statusText}`)
-  }
-
-  const data = (await response.json()) as { products: ShopifyProduct[] }
-
-  // Extract pagination cursor from Link header
-  const linkHeader = response.headers.get('Link')
-  let nextPageInfo: string | undefined
-
-  if (linkHeader) {
-    const match = linkHeader.match(/page_info=([^&>]+)[^>]*>;\s*rel="next"/)
-    if (match?.[1]) {
-      nextPageInfo = match[1]
+  const data = await adminGraphql<{
+    shop: { currencyCode: string }
+    products: {
+      nodes: ShopifyGraphqlProduct[]
+      pageInfo: { hasNextPage: boolean; endCursor: string | null }
     }
-  }
+  }>(shop, token, PRODUCT_LIST_QUERY, { cursor: pageInfo ?? null })
 
-  return { products: data.products, nextPageInfo }
+  return {
+    products: data.products.nodes.map((product) => mapGraphqlProduct(product, data.shop.currencyCode)),
+    nextPageInfo: data.products.pageInfo.hasNextPage
+      ? data.products.pageInfo.endCursor ?? undefined
+      : undefined,
+  }
 }
 
 export async function fetchShopifyProduct(
@@ -155,21 +298,126 @@ export async function fetchShopifyProduct(
   token: string,
   productId: string | number
 ): Promise<ShopifyProduct> {
-  const url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/products/${productId}.json`
+  const gid = String(productId).startsWith('gid://')
+    ? String(productId)
+    : `gid://shopify/Product/${productId}`
+  const data = await adminGraphql<{
+    shop: { currencyCode: string }
+    product: ShopifyGraphqlProduct | null
+  }>(shop, token, PRODUCT_QUERY, { id: gid })
+  if (!data.product) throw new Error(`Shopify product ${productId} not found`)
+  return mapGraphqlProduct(data.product, data.shop.currencyCode)
+}
 
-  const response = await fetch(url, {
-    headers: {
-      'X-Shopify-Access-Token': token,
-      'Content-Type': 'application/json',
-    },
-  })
-
-  if (!response.ok) {
-    throw new Error(`Shopify product fetch error: ${response.status}`)
+interface ShopifyGraphqlProduct {
+  id: string
+  legacyResourceId: string
+  title: string
+  descriptionHtml: string
+  vendor: string
+  productType: string
+  tags: string[]
+  status: string
+  createdAt: string
+  updatedAt: string
+  variants: {
+    nodes: Array<{
+      id: string
+      legacyResourceId: string
+      title: string
+      price: string
+      sku: string | null
+      inventoryQuantity: number | null
+      inventoryItem: { legacyResourceId: string; tracked: boolean } | null
+      selectedOptions: Array<{ name: string; value: string }>
+      inventoryPolicy: string
+    }>
   }
+  images: {
+    nodes: Array<{
+      id: string
+      url: string
+      altText: string | null
+      width: number | null
+      height: number | null
+    }>
+  }
+  metafields: {
+    nodes: Array<{ namespace: string; key: string; type: string; value: string }>
+  }
+}
 
-  const data = (await response.json()) as { product: ShopifyProduct }
-  return data.product
+const PRODUCT_FIELDS = /* GraphQL */ `
+  id legacyResourceId title descriptionHtml vendor productType tags status createdAt updatedAt
+  variants(first: 250) {
+    nodes {
+      id legacyResourceId title price sku inventoryQuantity inventoryPolicy
+      inventoryItem { legacyResourceId tracked }
+      selectedOptions { name value }
+    }
+  }
+  images(first: 50) { nodes { id url altText width height } }
+  metafields(first: 20, namespace: "cap") { nodes { namespace key type value } }
+`
+
+const PRODUCT_LIST_QUERY = /* GraphQL */ `
+  query CapProducts($cursor: String) {
+    shop { currencyCode }
+    products(first: 100, after: $cursor, sortKey: UPDATED_AT) {
+      nodes { ${PRODUCT_FIELDS} }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`
+
+const PRODUCT_QUERY = /* GraphQL */ `
+  query CapProduct($id: ID!) {
+    shop { currencyCode }
+    product(id: $id) { ${PRODUCT_FIELDS} }
+  }
+`
+
+function numericId(gidOrId: string): number {
+  return Number(gidOrId.split('/').pop())
+}
+
+function mapGraphqlProduct(product: ShopifyGraphqlProduct, currency: string): ShopifyProduct {
+  return {
+    id: Number(product.legacyResourceId || numericId(product.id)),
+    title: product.title,
+    body_html: product.descriptionHtml,
+    vendor: product.vendor,
+    product_type: product.productType,
+    tags: product.tags.join(', '),
+    status: product.status.toLowerCase(),
+    variants: product.variants.nodes.map((variant) => ({
+      id: Number(variant.legacyResourceId || numericId(variant.id)),
+      inventory_item_id: variant.inventoryItem
+        ? Number(variant.inventoryItem.legacyResourceId)
+        : null,
+      title: variant.title,
+      price: variant.price,
+      sku: variant.sku,
+      inventory_quantity: variant.inventoryQuantity ?? 0,
+      inventory_management: variant.inventoryItem?.tracked ? 'shopify' : null,
+      option1: variant.selectedOptions[0]?.value ?? null,
+      option2: variant.selectedOptions[1]?.value ?? null,
+      option3: variant.selectedOptions[2]?.value ?? null,
+      weight: 0,
+      weight_unit: 'kg',
+    })),
+    images: product.images.nodes.map((image) => ({
+      id: numericId(image.id),
+      src: image.url,
+      alt: image.altText,
+      width: image.width ?? 0,
+      height: image.height ?? 0,
+    })),
+    created_at: product.createdAt,
+    updated_at: product.updatedAt,
+    currency,
+    metafields: product.metafields.nodes,
+  }
 }
 
 // ============================================================
@@ -182,48 +430,89 @@ export async function ensureStorefrontAccessToken(
   shop: string,
   adminToken: string
 ): Promise<string> {
-  const url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/storefront_access_tokens.json`
+  const listed = await adminGraphql<{
+    storefrontAccessTokens: { nodes: Array<{ accessToken: string; title: string }> }
+  }>(shop, adminToken, `query CapStorefrontTokens {
+    storefrontAccessTokens(first: 50) { nodes { accessToken title } }
+  }`)
+  const existing = listed.storefrontAccessTokens.nodes.find((token) => token.title === 'CAP')
+  if (existing?.accessToken) return existing.accessToken
 
-  // Try to reuse an existing CAP token
-  const listRes = await fetch(url, {
-    headers: {
-      'X-Shopify-Access-Token': adminToken,
-      'Content-Type': 'application/json',
-    },
-  })
-
-  if (listRes.ok) {
-    const listData = (await listRes.json()) as {
-      storefront_access_tokens?: Array<{ access_token: string; title: string }>
+  const created = await adminGraphql<{
+    storefrontAccessTokenCreate: {
+      storefrontAccessToken: { accessToken: string } | null
+      userErrors: Array<{ field: string[]; message: string }>
     }
-    const existing = listData.storefront_access_tokens?.find(
-      (t) => t.title === 'CAP'
-    )
-    if (existing?.access_token) return existing.access_token
+  }>(shop, adminToken, `mutation CapStorefrontTokenCreate {
+    storefrontAccessTokenCreate(input: { title: "CAP" }) {
+      storefrontAccessToken { accessToken }
+      userErrors { field message }
+    }
+  }`)
+  const result = created.storefrontAccessTokenCreate
+  if (!result.storefrontAccessToken) {
+    throw new Error(result.userErrors.map((error) => error.message).join('; ') || 'Failed to create storefront access token')
   }
+  return result.storefrontAccessToken.accessToken
+}
 
-  // Otherwise create a new one
-  const createRes = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'X-Shopify-Access-Token': adminToken,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      storefront_access_token: { title: 'CAP' },
-    }),
-  })
+// ============================================================
+// WEBHOOK REGISTRATION
+// ============================================================
 
-  if (!createRes.ok) {
-    throw new Error(
-      `Failed to create storefront access token: ${createRes.status} ${createRes.statusText}`
-    )
+const CAP_WEBHOOK_TOPICS = [
+  'PRODUCTS_CREATE',
+  'PRODUCTS_UPDATE',
+  'PRODUCTS_DELETE',
+  'INVENTORY_LEVELS_UPDATE',
+  'ORDERS_CREATE',
+  'ORDERS_PAID',
+  'APP_UNINSTALLED',
+] as const
+
+export async function registerShopifyWebhooks(
+  shop: string,
+  adminToken: string,
+): Promise<void> {
+  const appUrl = process.env.SHOPIFY_APP_URL
+  if (!appUrl) throw new Error('SHOPIFY_APP_URL is not set')
+
+  const address = new URL('/webhooks/shopify', appUrl).toString()
+  const listData = await adminGraphql<{
+    webhookSubscriptions: { nodes: Array<{ topic: string; uri: string }> }
+  }>(shop, adminToken, `query CapWebhookSubscriptions {
+    webhookSubscriptions(first: 250) { nodes { topic uri } }
+  }`)
+  const existingTopics = new Set(
+    listData.webhookSubscriptions.nodes
+      .filter((webhook) => webhook.uri === address)
+      .map((webhook) => webhook.topic),
+  )
+
+  for (const topic of CAP_WEBHOOK_TOPICS) {
+    if (existingTopics.has(topic)) continue
+
+    const created = await adminGraphql<{
+      webhookSubscriptionCreate: {
+        webhookSubscription: { id: string } | null
+        userErrors: Array<{ field: string[]; message: string }>
+      }
+    }>(shop, adminToken, `mutation CapWebhookCreate(
+      $topic: WebhookSubscriptionTopic!
+      $webhookSubscription: WebhookSubscriptionInput!
+    ) {
+      webhookSubscriptionCreate(topic: $topic, webhookSubscription: $webhookSubscription) {
+        webhookSubscription { id }
+        userErrors { field message }
+      }
+    }`, {
+      topic,
+      webhookSubscription: { uri: address, format: 'JSON' },
+    })
+    if (!created.webhookSubscriptionCreate.webhookSubscription) {
+      throw new Error(created.webhookSubscriptionCreate.userErrors.map((error) => error.message).join('; ') || `Failed to register ${topic}`)
+    }
   }
-
-  const createData = (await createRes.json()) as {
-    storefront_access_token: { access_token: string }
-  }
-  return createData.storefront_access_token.access_token
 }
 
 // ============================================================
@@ -238,6 +527,7 @@ export interface CartCreateInput {
     email?: string
     countryCode?: string
   }
+  trackingToken: string
 }
 
 export interface ShopifyCartResult {
@@ -268,7 +558,7 @@ export class ShopifyCartError extends Error {
 /**
  * Create a Shopify Cart and return its checkoutUrl.
  *
- * Uses the Storefront API `cartCreate` mutation (2024-10), which replaces the
+ * Uses the versioned Storefront API `cartCreate` mutation, which replaces the
  * deprecated `checkoutCreate` mutation. The returned `checkoutUrl` is the URL
  * the agent (or the user) opens to complete payment.
  *
@@ -302,7 +592,12 @@ export async function createShopifyCart(
     : `gid://shopify/ProductVariant/${input.variantId}`
 
   const cartInput: Record<string, unknown> = {
-    lines: [{ merchandiseId: variantGid, quantity: input.quantity }],
+    lines: [{
+      merchandiseId: variantGid,
+      quantity: input.quantity,
+      attributes: [{ key: '_cap_checkout_id', value: input.trackingToken }],
+    }],
+    attributes: [{ key: 'cap_checkout_id', value: input.trackingToken }],
   }
 
   const countryCode =
@@ -314,7 +609,7 @@ export async function createShopifyCart(
     }
   }
 
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `https://${shop}/api/${SHOPIFY_API_VERSION}/graphql.json`,
     {
       method: 'POST',
@@ -323,7 +618,7 @@ export async function createShopifyCart(
         'X-Shopify-Storefront-Access-Token': storefrontToken,
       },
       body: JSON.stringify({ query, variables: { input: cartInput } }),
-    }
+    },
   )
 
   if (!response.ok) {
@@ -385,8 +680,14 @@ export async function createShopifyCart(
 
 const ALGORITHM = 'aes-256-gcm'
 
+function encryptionKey(): Buffer {
+  const key = Buffer.from(process.env.ENCRYPTION_KEY ?? '', 'utf8')
+  if (key.length < 32) throw new Error('ENCRYPTION_KEY must contain at least 32 bytes')
+  return key.subarray(0, 32)
+}
+
 export function encryptToken(plaintext: string): string {
-  const key = Buffer.from(process.env.ENCRYPTION_KEY ?? '', 'utf8').slice(0, 32)
+  const key = encryptionKey()
   const iv = crypto.randomBytes(16)
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv)
   const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
@@ -396,7 +697,7 @@ export function encryptToken(plaintext: string): string {
 }
 
 export function decryptToken(ciphertext: string): string {
-  const key = Buffer.from(process.env.ENCRYPTION_KEY ?? '', 'utf8').slice(0, 32)
+  const key = encryptionKey()
   const [ivHex, tagHex, encryptedHex] = ciphertext.split(':')
   if (!ivHex || !tagHex || !encryptedHex) throw new Error('Invalid ciphertext format')
 

@@ -12,9 +12,10 @@ interface ApiKey {
 
 interface ApiKeysClientProps {
   keys: ApiKey[]
+  merchantDomain: string | null
 }
 
-export default function ApiKeysClient({ keys }: ApiKeysClientProps) {
+export default function ApiKeysClient({ keys, merchantDomain }: ApiKeysClientProps) {
   const [apiKeys, setApiKeys] = useState(keys)
   const [newKeyValue, setNewKeyValue] = useState<string | null>(null)
   const [label, setLabel] = useState('')
@@ -27,6 +28,7 @@ export default function ApiKeysClient({ keys }: ApiKeysClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ label }),
       })
+      if (!res.ok) return
       const data = await res.json() as { key?: string; id?: string; prefix?: string; label?: string | null; createdAt?: string }
       if (data.key) {
         setNewKeyValue(data.key)
@@ -41,8 +43,8 @@ export default function ApiKeysClient({ keys }: ApiKeysClientProps) {
 
   function revokeKey(id: string) {
     startTransition(async () => {
-      await fetch(`/api/keys/${id}`, { method: 'DELETE' })
-      setApiKeys(prev => prev.filter(k => k.id !== id))
+      const response = await fetch(`/api/keys/${id}`, { method: 'DELETE' })
+      if (response.ok) setApiKeys(prev => prev.filter(k => k.id !== id))
     })
   }
 
@@ -51,7 +53,9 @@ export default function ApiKeysClient({ keys }: ApiKeysClientProps) {
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0, letterSpacing: '-0.03em' }}>API Keys</h1>
         <p style={{ color: 'var(--text-secondary)', marginTop: 4, fontSize: 14 }}>
-          Use these keys to authenticate requests to the CAP Agent API
+          {merchantDomain
+            ? `Keys for ${merchantDomain}`
+            : 'Connect a Shopify store before creating API keys'}
         </p>
       </div>
 
@@ -66,7 +70,7 @@ export default function ApiKeysClient({ keys }: ApiKeysClientProps) {
             display: 'block',
           }}
         >
-          {`curl -X POST https://api.commerceagent.io/v1/search \\
+          {`curl -X POST https://api.cap-protocol.org/v1/search \\
   -H "X-CAP-Key: cap_live_your_key_here" \\
   -d '{"query": "white sneakers", "filters": {"price_max": 120}}'`}
         </code>
@@ -89,12 +93,12 @@ export default function ApiKeysClient({ keys }: ApiKeysClientProps) {
           />
           <button
             onClick={createKey}
-            disabled={isPending}
+            disabled={isPending || !merchantDomain}
             style={{
               padding: '10px 20px', borderRadius: 8, border: 'none',
               background: 'linear-gradient(135deg, #6c63ff, #a78bfa)',
               color: 'white', fontWeight: 600, fontSize: 14, cursor: 'pointer',
-              opacity: isPending ? 0.7 : 1,
+              opacity: isPending || !merchantDomain ? 0.7 : 1,
             }}
           >
             {isPending ? 'Creating…' : '+ Create Key'}

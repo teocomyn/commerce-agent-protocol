@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
+import crypto from 'node:crypto'
 import { prisma } from '@cap/db'
 import {
   CheckoutInitiateSchema,
@@ -10,6 +10,7 @@ import {
   decryptToken,
   ShopifyCartError,
 } from '../lib/shopify.js'
+import { capJsonValidator } from '../lib/validation.js'
 
 const checkoutRouter = new Hono()
 
@@ -34,7 +35,7 @@ interface CheckoutInitiateResponse {
 }
 
 // POST /v1/checkout/initiate
-checkoutRouter.post('/initiate', zValidator('json', CheckoutInitiateSchema), async (c) => {
+checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async (c) => {
   const auth = c.get('auth')
   const body = c.req.valid('json')
   const { product_id, variant_id, quantity, shipping_country, agent_session_id } = body
@@ -126,6 +127,29 @@ checkoutRouter.post('/initiate', zValidator('json', CheckoutInitiateSchema), asy
     }, 409)
   }
 
+  let resolvedAgentQueryId: string | null = null
+  if (agent_session_id) {
+    const aq = await prisma.agentQuery.findFirst({
+      where: { id: agent_session_id, merchantId: product.merchantId },
+      select: { id: true },
+    })
+    resolvedAgentQueryId = aq?.id ?? null
+  }
+
+  // Persist before the upstream call. The opaque token is copied into Shopify
+  // cart attributes and later returned on the order webhook.
+  const trackingToken = crypto.randomBytes(32).toString('hex')
+  const agentCheckout = await prisma.agentCheckout.create({
+    data: {
+      merchantId: product.merchantId,
+      productId: product.id,
+      trackingToken,
+      status: 'creating',
+      currency: product.currency,
+      agentQueryId: resolvedAgentQueryId,
+    },
+  })
+
   // 4. Create the Shopify Cart (replaces deprecated checkoutCreate)
   const storefrontToken = decryptToken(product.merchant.storefrontToken)
   let cart
@@ -134,8 +158,13 @@ checkoutRouter.post('/initiate', zValidator('json', CheckoutInitiateSchema), asy
       variantId: String(chosenVariant.id),
       quantity,
       shippingCountry: shipping_country,
+      trackingToken,
     })
   } catch (err) {
+    await prisma.agentCheckout.update({
+      where: { id: agentCheckout.id },
+      data: { status: 'failed' },
+    }).catch(() => undefined)
     const userErrors =
       err instanceof ShopifyCartError ? err.userErrors : undefined
     return c.json<CAPError>({
@@ -148,29 +177,15 @@ checkoutRouter.post('/initiate', zValidator('json', CheckoutInitiateSchema), asy
     }, 502)
   }
 
-  let resolvedAgentQueryId: string | null = null
-  if (agent_session_id) {
-    const aq = await prisma.agentQuery.findFirst({
-      where: {
-        id: agent_session_id,
-        merchantId: product.merchantId,
-      },
-      select: { id: true },
-    })
-    resolvedAgentQueryId = aq?.id ?? null
-  }
-
-  // 5. Persist the AgentCheckout record so we can reconcile with orders/create webhooks
+  // 5. Attach the upstream cart to the pre-created checkout record.
   const totalAmount = parseFloat(cart.totalAmount)
-  const agentCheckout = await prisma.agentCheckout.create({
+  await prisma.agentCheckout.update({
+    where: { id: agentCheckout.id },
     data: {
-      merchantId: product.merchantId,
-      productId: product.id,
       shopifyCheckoutId: cart.cartId,
       status: 'pending',
       amount: Number.isFinite(totalAmount) ? totalAmount : null,
       currency: cart.currency,
-      agentQueryId: resolvedAgentQueryId,
     },
   })
 

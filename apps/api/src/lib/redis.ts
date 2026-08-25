@@ -28,9 +28,9 @@ export const redis = getRedis()
 
 // Helpers
 export async function cacheGet<T>(key: string): Promise<T | null> {
-  const value = await redis.get(key)
-  if (!value) return null
   try {
+    const value = await redis.get(key)
+    if (!value) return null
     return JSON.parse(value) as T
   } catch {
     return null
@@ -38,11 +38,26 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
 }
 
 export async function cacheSet(key: string, value: unknown, ttlSeconds = 300): Promise<void> {
-  await redis.setex(key, ttlSeconds, JSON.stringify(value))
+  await redis.setex(key, ttlSeconds, JSON.stringify(value)).catch(() => undefined)
 }
 
 export async function cacheDel(key: string): Promise<void> {
-  await redis.del(key)
+  await redis.del(key).catch(() => undefined)
+}
+
+export async function invalidateMerchantSearchCache(merchantId: string): Promise<void> {
+  let cursor = '0'
+  do {
+    const [nextCursor, keys] = await redis.scan(
+      cursor,
+      'MATCH',
+      `search:${merchantId}:*`,
+      'COUNT',
+      100,
+    )
+    cursor = nextCursor
+    if (keys.length > 0) await redis.unlink(...keys)
+  } while (cursor !== '0')
 }
 
 // Rate limiting: sliding window counter

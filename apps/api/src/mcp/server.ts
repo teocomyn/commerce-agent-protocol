@@ -7,13 +7,14 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { prisma } from '@cap/db'
 import OpenAI from 'openai'
+import crypto from 'node:crypto'
 import {
   createShopifyCart,
   decryptToken,
   ShopifyCartError,
 } from '../lib/shopify.js'
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 10_000, maxRetries: 2 })
 
 // In MCP (stdio) mode, calls are not authenticated by an API key. The server
 // is bound to a single merchant via the CAP_MERCHANT_ID environment variable
@@ -219,7 +220,7 @@ async function handleCommerceSearch(args: Record<string, unknown>) {
     ...params,
   )
 
-  const checkoutBase = process.env.SHOPIFY_APP_URL ?? 'https://api.commerceagent.io'
+  const checkoutBase = process.env.SHOPIFY_APP_URL ?? 'https://api.cap-protocol.org'
 
   return results.map((r) => ({
     id: r.id,
@@ -387,14 +388,29 @@ async function handleCommerceCheckout(args: Record<string, unknown>) {
   }
 
   const storefrontToken = decryptToken(product.merchant.storefrontToken)
+  const trackingToken = crypto.randomBytes(32).toString('hex')
+  const agentCheckout = await prisma.agentCheckout.create({
+    data: {
+      merchantId,
+      productId: product.id,
+      trackingToken,
+      status: 'creating',
+      currency: product.currency,
+    },
+  })
   let cart
   try {
     cart = await createShopifyCart(product.merchant.shopifyDomain, storefrontToken, {
       variantId: String(chosen.id),
       quantity,
       shippingCountry,
+      trackingToken,
     })
   } catch (err) {
+    await prisma.agentCheckout.update({
+      where: { id: agentCheckout.id },
+      data: { status: 'failed' },
+    }).catch(() => undefined)
     if (err instanceof ShopifyCartError) {
       throw new Error(`Cart creation failed: ${err.message}`)
     }
@@ -402,10 +418,9 @@ async function handleCommerceCheckout(args: Record<string, unknown>) {
   }
 
   const totalAmount = parseFloat(cart.totalAmount)
-  const agentCheckout = await prisma.agentCheckout.create({
+  await prisma.agentCheckout.update({
+    where: { id: agentCheckout.id },
     data: {
-      merchantId,
-      productId: product.id,
       shopifyCheckoutId: cart.cartId,
       status: 'pending',
       amount: Number.isFinite(totalAmount) ? totalAmount : null,

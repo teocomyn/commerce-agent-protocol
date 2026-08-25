@@ -1,12 +1,12 @@
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
 import { prisma } from '@cap/db'
 import { CompareRequestSchema, type CompareResponse, type CAPError } from '@cap/shared'
+import { capJsonValidator } from '../lib/validation.js'
 
 const compareRouter = new Hono()
 
 // POST /v1/compare
-compareRouter.post('/', zValidator('json', CompareRequestSchema), async (c) => {
+compareRouter.post('/', capJsonValidator(CompareRequestSchema), async (c) => {
   const auth = c.get('auth')
   const { product_ids, criteria } = c.req.valid('json')
 

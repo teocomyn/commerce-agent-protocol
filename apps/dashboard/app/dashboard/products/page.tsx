@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { prisma } from '@cap/db'
+import { getDashboardMerchant } from '@/lib/merchant-context'
 
 function GeoBar({ score }: { score: number }) {
   const color = score >= 70 ? '#22c55e' : score >= 40 ? '#f59e0b' : '#ef4444'
@@ -25,12 +26,10 @@ export default async function ProductsPage({
   const pageSize = 20
   const offset = (page - 1) * pageSize
 
-  const firstMerchant = await prisma.merchant.findFirst({
-    orderBy: { createdAt: 'asc' },
-    select: { id: true },
-  })
-  const storeScope =
-    firstMerchant != null ? { merchantId: firstMerchant.id } : {}
+  const merchant = await getDashboardMerchant()
+  const storeScope = {
+    merchantId: merchant?.id ?? '00000000-0000-0000-0000-000000000000',
+  }
 
   const orderByMap: Record<string, object> = {
     geo_asc: { geoScore: 'asc' },
@@ -61,7 +60,7 @@ export default async function ProductsPage({
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0, letterSpacing: '-0.03em' }}>Products</h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginTop: 4 }}>
-            {total.toLocaleString()} enriched products
+            {total.toLocaleString()} enriched products{merchant ? ` for ${merchant.shopifyDomain}` : ''}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>

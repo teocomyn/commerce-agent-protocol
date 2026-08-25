@@ -6,12 +6,11 @@ import { z } from 'zod'
 export const SearchFiltersSchema = z.object({
   price_min: z.number().min(0).optional(),
   price_max: z.number().min(0).optional(),
-  currency: z.enum(['EUR', 'USD', 'GBP']).optional().default('EUR'),
+  currency: z.enum(['EUR', 'USD', 'GBP']).optional(),
   certifications: z.array(z.string()).optional(),
   in_stock: z.boolean().optional(),
   shipping_country: z.string().length(2).optional(), // ISO 3166-1 alpha-2
   category: z.string().optional(),
-  merchant_ids: z.array(z.string().uuid()).optional(),
 })
 
 export const SearchRequestSchema = z.object({
@@ -29,7 +28,7 @@ export type SearchFilters = z.infer<typeof SearchFiltersSchema>
 // ============================================================
 export const CompareRequestSchema = z.object({
   product_ids: z.array(z.string().uuid()).min(2).max(10),
-  criteria: z.array(z.enum(['price', 'certifications', 'shipping', 'specs', 'reviews', 'return_policy'])).optional().default(['price', 'certifications', 'shipping', 'specs']),
+  criteria: z.array(z.enum(['price', 'certifications', 'shipping', 'specs', 'return_policy'])).optional().default(['price', 'certifications', 'shipping', 'specs']),
 })
 
 export type CompareRequest = z.infer<typeof CompareRequestSchema>

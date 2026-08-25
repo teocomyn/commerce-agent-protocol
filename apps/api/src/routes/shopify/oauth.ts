@@ -6,6 +6,11 @@ import {
   exchangeCodeForToken,
   encryptToken,
   ensureStorefrontAccessToken,
+  fetchShopConfiguration,
+  isValidShopDomain,
+  registerShopifyWebhooks,
+  validateGrantedScopes,
+  verifyShopifyOAuthHmac,
 } from '../../lib/shopify.js'
 import { catalogSyncQueue } from '../../lib/queue.js'
 import { redis } from '../../lib/redis.js'
@@ -19,7 +24,7 @@ const nonceKey = (nonce: string) => `oauth:nonce:${nonce}`
 oauthRouter.get('/install', async (c) => {
   const shop = c.req.query('shop')
 
-  if (!shop || !shop.endsWith('.myshopify.com')) {
+  if (!shop || !isValidShopDomain(shop)) {
     return c.text('Invalid shop parameter', 400)
   }
 
@@ -34,44 +39,54 @@ oauthRouter.get('/install', async (c) => {
 oauthRouter.get('/callback', async (c) => {
   const { shop, code, state, hmac } = c.req.query() as Record<string, string>
 
-  if (!shop || !code || !state || !hmac) {
+  if (!shop || !isValidShopDomain(shop) || !code || !state || !hmac) {
     return c.text('Missing required OAuth parameters', 400)
   }
+
+  if (!process.env.SHOPIFY_API_SECRET) throw new Error('SHOPIFY_API_SECRET is not set')
 
   // Validate nonce (Redis-backed, scales horizontally and survives restarts)
   const storedShop = await redis.get(nonceKey(state))
   if (!storedShop || storedShop !== shop) {
     return c.text('Invalid or expired state', 400)
   }
-  await redis.del(nonceKey(state))
-
   // Validate HMAC on the callback params
-  const params = new URLSearchParams(c.req.query() as Record<string, string>)
-  params.delete('hmac')
-  params.sort()
-  const message = params.toString()
-  const expectedHmac = crypto
-    .createHmac('sha256', process.env.SHOPIFY_API_SECRET ?? '')
-    .update(message)
-    .digest('hex')
-
-  const expected = Buffer.from(expectedHmac)
-  const received = Buffer.from(hmac)
-  if (
-    expected.length !== received.length ||
-    !crypto.timingSafeEqual(expected, received)
-  ) {
+  if (!verifyShopifyOAuthHmac(c.req.query() as Record<string, string>)) {
     return c.text('HMAC validation failed', 401)
   }
 
+  // Consume the nonce atomically only after signature validation. This blocks
+  // replay without letting an invalid callback burn a legitimate OAuth state.
+  const consumed = await redis.eval(
+    'if redis.call("get", KEYS[1]) == ARGV[1] then redis.call("del", KEYS[1]); return 1 else return 0 end',
+    1,
+    nonceKey(state),
+    shop,
+  )
+  if (consumed !== 1) return c.text('Invalid or replayed state', 400)
+
   // Exchange code for admin access token
-  const accessToken = await exchangeCodeForToken(shop, code)
-  const encryptedAdminToken = encryptToken(accessToken)
+  const tokenResult = await exchangeCodeForToken(shop, code)
+  const missingScopes = validateGrantedScopes(tokenResult.grantedScopes)
+  if (missingScopes.length > 0) {
+    return c.json({
+      error: {
+        code: 'SHOPIFY_SCOPES_MISSING',
+        message: 'Shopify did not grant all required scopes',
+        details: { missing_scopes: missingScopes },
+      },
+    }, 403)
+  }
+  const encryptedAdminToken = encryptToken(tokenResult.accessToken)
+  const encryptedRefreshToken = tokenResult.refreshToken
+    ? encryptToken(tokenResult.refreshToken)
+    : null
+  const shopConfiguration = await fetchShopConfiguration(shop, tokenResult.accessToken)
 
   // Provision a storefront access token for Cart API checkouts
   let encryptedStorefrontToken: string | null = null
   try {
-    const storefrontToken = await ensureStorefrontAccessToken(shop, accessToken)
+    const storefrontToken = await ensureStorefrontAccessToken(shop, tokenResult.accessToken)
     encryptedStorefrontToken = encryptToken(storefrontToken)
   } catch (err) {
     // Non-fatal: catalog sync still works, checkouts will be unavailable until
@@ -88,11 +103,22 @@ oauthRouter.get('/callback', async (c) => {
     create: {
       shopifyDomain: shop,
       shopifyToken: encryptedAdminToken,
+      shopifyRefreshToken: encryptedRefreshToken,
+      accessTokenExpiresAt: tokenResult.accessTokenExpiresAt,
+      refreshTokenExpiresAt: tokenResult.refreshTokenExpiresAt,
+      grantedScopes: tokenResult.grantedScopes,
       storefrontToken: encryptedStorefrontToken,
+      shopCurrency: shopConfiguration.currency,
       plan: 'free',
     },
     update: {
       shopifyToken: encryptedAdminToken,
+      shopifyRefreshToken: encryptedRefreshToken,
+      accessTokenExpiresAt: tokenResult.accessTokenExpiresAt,
+      refreshTokenExpiresAt: tokenResult.refreshTokenExpiresAt,
+      grantedScopes: tokenResult.grantedScopes,
+      shopCurrency: shopConfiguration.currency,
+      uninstalledAt: null,
       ...(encryptedStorefrontToken && {
         storefrontToken: encryptedStorefrontToken,
       }),
@@ -100,18 +126,48 @@ oauthRouter.get('/callback', async (c) => {
     },
   })
 
+  const user = await prisma.user.upsert({
+    where: { externalId: `shopify:${shop}` },
+    create: { externalId: `shopify:${shop}`, name: shopConfiguration.name },
+    update: { name: shopConfiguration.name },
+  })
+  await prisma.merchantMember.upsert({
+    where: { userId_merchantId: { userId: user.id, merchantId: merchant.id } },
+    create: { userId: user.id, merchantId: merchant.id, role: 'OWNER' },
+    update: { role: 'OWNER', revokedAt: null },
+  })
+
+  try {
+    await registerShopifyWebhooks(shop, tokenResult.accessToken)
+  } catch (err) {
+    console.warn(
+      `[OAuth] Could not register webhooks for ${shop}:`,
+      err instanceof Error ? err.message : err
+    )
+  }
+
   // Trigger full catalog sync
   await catalogSyncQueue.add('full-catalog-sync', {
     merchantId: merchant.id,
     shopDomain: shop,
-    shopifyToken: encryptedAdminToken,
   })
 
   console.log(`[OAuth] Merchant ${shop} connected. Catalog sync triggered.`)
 
   // Redirect to dashboard
-  const dashboardUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3001'
-  return c.redirect(`${dashboardUrl}/dashboard?connected=true`)
+  const dashboardUrl = process.env.DASHBOARD_URL ?? 'http://localhost:3001'
+  const loginToken = crypto.randomBytes(32).toString('base64url')
+  await prisma.dashboardLoginToken.create({
+    data: {
+      tokenHash: crypto.createHash('sha256').update(loginToken).digest('hex'),
+      userId: user.id,
+      merchantId: merchant.id,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1_000),
+    },
+  })
+  const sessionUrl = new URL('/api/session/merchant', dashboardUrl)
+  sessionUrl.searchParams.set('token', loginToken)
+  return c.redirect(sessionUrl.toString())
 })
 
 export { oauthRouter }
