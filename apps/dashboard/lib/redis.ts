@@ -24,3 +24,18 @@ export async function invalidateApiKeyCache(keyHash: string): Promise<void> {
     )
   }
 }
+
+export async function consumeDashboardLoginAttempt(key: string): Promise<{
+  allowed: boolean
+  retryAfterSeconds: number
+}> {
+  const redisKey = `dashboard:login:${key}`
+  const count = await dashboardRedis.incr(redisKey)
+  if (count === 1) await dashboardRedis.expire(redisKey, 15 * 60)
+  const ttl = await dashboardRedis.ttl(redisKey)
+  return { allowed: count <= 10, retryAfterSeconds: Math.max(1, ttl) }
+}
+
+export async function clearDashboardLoginAttempts(key: string): Promise<void> {
+  await dashboardRedis.del(`dashboard:login:${key}`)
+}

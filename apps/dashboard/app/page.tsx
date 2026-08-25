@@ -46,6 +46,17 @@ export default function HomePage() {
           >
             📊 View Dashboard
           </Link>
+          <Link
+            href="/login"
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              border: '1px solid var(--border)', color: 'var(--text-secondary)',
+              padding: '14px 28px', borderRadius: 10, fontWeight: 600,
+              fontSize: 16, textDecoration: 'none',
+            }}
+          >
+            Team sign in
+          </Link>
         </div>
 
         {/* Stats */}

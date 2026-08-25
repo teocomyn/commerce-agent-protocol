@@ -39,6 +39,7 @@ model Merchant {
   members              MerchantMember[]
   dashboardLoginTokens DashboardLoginToken[]
   webhookEvents        WebhookEvent[]
+  invitations          MerchantInvitation[]
 
   @@map("merchants")
 }
@@ -50,17 +51,40 @@ enum MerchantRole {
 }
 
 model User {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  externalId String   @unique @map("external_id") @db.VarChar(255)
-  email      String?  @db.VarChar(320)
-  name       String?  @db.VarChar(255)
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  externalId   String   @unique @map("external_id") @db.VarChar(255)
+  email        String?  @unique @db.VarChar(320)
+  name         String?  @db.VarChar(255)
+  passwordHash String?  @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   memberships          MerchantMember[]
   dashboardLoginTokens DashboardLoginToken[]
+  sentInvitations      MerchantInvitation[]
 
   @@map("users")
+}
+
+model MerchantInvitation {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  merchantId      String       @map("merchant_id") @db.Uuid
+  email           String       @db.VarChar(320)
+  role            MerchantRole @default(ANALYST)
+  tokenHash       String       @unique @map("token_hash") @db.VarChar(64)
+  invitedByUserId String       @map("invited_by_user_id") @db.Uuid
+  expiresAt       DateTime     @map("expires_at") @db.Timestamptz
+  acceptedAt      DateTime?    @map("accepted_at") @db.Timestamptz
+  revokedAt       DateTime?    @map("revoked_at") @db.Timestamptz
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  merchant  Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  invitedBy User     @relation(fields: [invitedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, email])
+  @@index([expiresAt])
+  @@map("merchant_invitations")
 }
 
 model MerchantMember {

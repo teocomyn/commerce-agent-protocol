@@ -1,18 +1,31 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { type ReactNode } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
+import { type ReactNode, useTransition } from 'react'
 
 const navItems = [
   { href: '/dashboard', icon: '📊', label: 'Overview' },
   { href: '/dashboard/products', icon: '📦', label: 'Products' },
   { href: '/dashboard/analytics', icon: '📈', label: 'Analytics' },
   { href: '/dashboard/api-keys', icon: '🔑', label: 'API Keys' },
+  { href: '/dashboard/team', icon: '👥', label: 'Team' },
 ]
 
-function Sidebar() {
+function Sidebar({ role }: { role: string }) {
   const pathname = usePathname()
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+
+  function logout() {
+    startTransition(async () => {
+      const response = await fetch('/api/session/logout', { method: 'POST' })
+      if (response.ok) {
+        router.replace('/login')
+        router.refresh()
+      }
+    })
+  }
 
   return (
     <aside style={{
@@ -58,6 +71,9 @@ function Sidebar() {
       })}
 
       <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+        <div style={{ padding: '4px 12px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>
+          Signed in as {role.toLowerCase()}
+        </div>
         <a
           href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'}/openapi.json`}
           target="_blank"
@@ -74,15 +90,27 @@ function Sidebar() {
         >
           ⭐ GitHub
         </a>
+        <button
+          type="button"
+          onClick={logout}
+          disabled={isPending}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+            padding: '9px 12px', color: 'var(--text-secondary)', background: 'transparent',
+            border: 0, cursor: isPending ? 'wait' : 'pointer', fontSize: 13,
+          }}
+        >
+          ↪ {isPending ? 'Signing out…' : 'Sign out'}
+        </button>
       </div>
     </aside>
   )
 }
 
-export function DashboardShell({ children }: { children: ReactNode }) {
+export function DashboardShell({ children, role }: { children: ReactNode; role: string }) {
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg-primary)' }}>
-      <Sidebar />
+      <Sidebar role={role} />
       <main style={{ flex: 1, overflow: 'auto' }}>
         {children}
       </main>

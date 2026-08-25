@@ -118,7 +118,7 @@ MCP_MODE=true CAP_MERCHANT_ID=<merchant-uuid> pnpm --filter=@cap/api dev
 | Path | What lives here |
 |------|-----------------|
 | `apps/api` | Hono API — OAuth, webhooks, search/compare/checkout, MCP server |
-| `apps/dashboard` | Next.js 15 dashboard — merchant overview, products, API keys |
+| `apps/dashboard` | Next.js 15 dashboard — merchant overview, products, API keys, human accounts and roles |
 | `packages/db` | Prisma schema + migrations + client |
 | `packages/shared` | Zod schemas, GEO score, utilities shared across packages |
 | `cap-spec/` | The CAP protocol specification (versioned, language-agnostic) |
@@ -132,7 +132,7 @@ CAP is **alpha (v0.1)**. The catalog + search + checkout loop works end-to-end a
 
 See the [CHANGELOG](./CHANGELOG.md) for the full release history.
 
-Production runs the API, dashboard, catalog worker, and enrichment worker as separate services. See the [staging runbook](./docs/STAGING.md), [Shopify E2E runbook](./docs/SHOPIFY_E2E.md), [operations runbook](./docs/OPERATIONS.md), [production deployment runbook](./docs/PRODUCTION_DEPLOYMENT.md), [`render.staging.yaml`](./render.staging.yaml), and [`render.yaml`](./render.yaml).
+Production runs the API, dashboard, catalog worker, and enrichment worker as separate services. See the [dashboard authentication guide](./docs/DASHBOARD_AUTH.md), [staging runbook](./docs/STAGING.md), [Shopify E2E runbook](./docs/SHOPIFY_E2E.md), [operations runbook](./docs/OPERATIONS.md), [production deployment runbook](./docs/PRODUCTION_DEPLOYMENT.md), [`render.staging.yaml`](./render.staging.yaml), and [`render.yaml`](./render.yaml).
 
 ---
 
