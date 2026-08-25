@@ -1,5 +1,5 @@
 databases:
-  - name: cap-postgres
+  - name: cap-staging-postgres
     plan: basic-256mb
     region: frankfurt
     postgresMajorVersion: "16"
@@ -7,7 +7,7 @@ databases:
 
 services:
   - type: keyvalue
-    name: cap-redis
+    name: cap-staging-redis
     plan: starter
     region: frankfurt
     ipAllowList: []
@@ -15,37 +15,40 @@ services:
     persistenceMode: journal-snapshot
 
   - type: web
-    name: cap-api
+    name: cap-staging-api
     runtime: docker
     plan: starter
     region: frankfurt
+    branch: main
     dockerfilePath: ./Dockerfile.api
     dockerContext: .
-    autoDeployTrigger: checksPass
+    autoDeployTrigger: off
     healthCheckPath: /health
     domains:
-      - api.cap-protocol.org
+      - api-staging.cap-protocol.org
     preDeployCommand: pnpm db:migrate
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: cap-postgres
+          name: cap-staging-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
           type: keyvalue
-          name: cap-redis
+          name: cap-staging-redis
           property: connectionString
       - key: API_PORT
         value: "10000"
       - key: NODE_ENV
         value: production
+      - key: CAP_ENV
+        value: staging
       - key: SHOPIFY_API_VERSION
         value: "2026-07"
       - key: SHOPIFY_APP_URL
-        value: https://api.cap-protocol.org
+        value: https://api-staging.cap-protocol.org
       - key: DASHBOARD_URL
-        value: https://dashboard.cap-protocol.org
+        value: https://dashboard-staging.cap-protocol.org
       - key: SHOPIFY_TIMEOUT_MS
         value: "10000"
       - key: OPENAI_API_KEY
@@ -60,99 +63,106 @@ services:
         sync: false
 
   - type: worker
-    name: cap-catalog-worker
+    name: cap-staging-catalog-worker
     runtime: docker
     plan: starter
     region: frankfurt
+    branch: main
     dockerfilePath: ./Dockerfile.api
     dockerContext: .
     dockerCommand: pnpm --filter @cap/api start:worker:catalog
-    autoDeployTrigger: checksPass
+    autoDeployTrigger: off
     maxShutdownDelaySeconds: 120
-    envVars: &worker-env
+    envVars: &staging-worker-env
       - key: DATABASE_URL
         fromDatabase:
-          name: cap-postgres
+          name: cap-staging-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
           type: keyvalue
-          name: cap-redis
+          name: cap-staging-redis
           property: connectionString
       - key: NODE_ENV
         value: production
+      - key: CAP_ENV
+        value: staging
       - key: SHOPIFY_API_VERSION
         value: "2026-07"
       - key: SHOPIFY_APP_URL
-        value: https://api.cap-protocol.org
+        value: https://api-staging.cap-protocol.org
       - key: DASHBOARD_URL
-        value: https://dashboard.cap-protocol.org
+        value: https://dashboard-staging.cap-protocol.org
       - key: SHOPIFY_TIMEOUT_MS
         value: "10000"
       - key: OPENAI_API_KEY
         fromService:
           type: web
-          name: cap-api
+          name: cap-staging-api
           envVarKey: OPENAI_API_KEY
       - key: SHOPIFY_API_KEY
         fromService:
           type: web
-          name: cap-api
+          name: cap-staging-api
           envVarKey: SHOPIFY_API_KEY
       - key: SHOPIFY_API_SECRET
         fromService:
           type: web
-          name: cap-api
+          name: cap-staging-api
           envVarKey: SHOPIFY_API_SECRET
       - key: SHOPIFY_SCOPES
         fromService:
           type: web
-          name: cap-api
+          name: cap-staging-api
           envVarKey: SHOPIFY_SCOPES
       - key: ENCRYPTION_KEY
         fromService:
           type: web
-          name: cap-api
+          name: cap-staging-api
           envVarKey: ENCRYPTION_KEY
 
   - type: worker
-    name: cap-enrichment-worker
+    name: cap-staging-enrichment-worker
     runtime: docker
     plan: starter
     region: frankfurt
+    branch: main
     dockerfilePath: ./Dockerfile.api
     dockerContext: .
     dockerCommand: pnpm --filter @cap/api start:worker:enrichment
-    autoDeployTrigger: checksPass
+    autoDeployTrigger: off
     maxShutdownDelaySeconds: 120
-    envVars: *worker-env
+    envVars: *staging-worker-env
 
   - type: web
-    name: cap-dashboard
+    name: cap-staging-dashboard
     runtime: docker
     plan: starter
     region: frankfurt
+    branch: main
     dockerfilePath: ./Dockerfile.dashboard
     dockerContext: .
-    autoDeployTrigger: checksPass
+    autoDeployTrigger: off
     healthCheckPath: /
     domains:
-      - dashboard.cap-protocol.org
+      - dashboard-staging.cap-protocol.org
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: cap-postgres
+          name: cap-staging-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
           type: keyvalue
-          name: cap-redis
+          name: cap-staging-redis
           property: connectionString
       - key: NODE_ENV
         value: production
+      - key: CAP_ENV
+        value: staging
       - key: NEXT_PUBLIC_API_URL
-        value: https://api.cap-protocol.org
+        value: https://api-staging.cap-protocol.org
       - key: DASHBOARD_URL
-        value: https://dashboard.cap-protocol.org
+        value: https://dashboard-staging.cap-protocol.org
       - key: DASHBOARD_SESSION_SECRET
         generateValue: true

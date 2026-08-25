@@ -132,7 +132,7 @@ CAP is **alpha (v0.1)**. The catalog + search + checkout loop works end-to-end a
 
 See the [CHANGELOG](./CHANGELOG.md) for the full release history.
 
-Production runs the API, dashboard, catalog worker, and enrichment worker as separate services. See the [production deployment runbook](./docs/PRODUCTION_DEPLOYMENT.md) and [`render.yaml`](./render.yaml).
+Production runs the API, dashboard, catalog worker, and enrichment worker as separate services. See the [staging runbook](./docs/STAGING.md), [production deployment runbook](./docs/PRODUCTION_DEPLOYMENT.md), [`render.staging.yaml`](./render.staging.yaml), and [`render.yaml`](./render.yaml).
 
 ---
 

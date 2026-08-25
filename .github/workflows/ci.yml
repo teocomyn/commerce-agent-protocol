@@ -72,6 +72,9 @@ jobs:
       - name: Validate Prisma schema
         run: pnpm --filter=@cap/db exec prisma validate --schema prisma/schema.prisma
 
+      - name: Validate deployment blueprints
+        run: ruby -e 'require "yaml"; Psych.parse_file("render.yaml"); Psych.parse_file("render.staging.yaml")'
+
       - name: Apply test database migrations
         run: pnpm db:migrate
 
