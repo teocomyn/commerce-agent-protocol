@@ -53,6 +53,8 @@ pnpm smoke:staging
 
 The smoke test verifies HTTPS, API health, the OpenAPI document, the unauthenticated API boundary, and dashboard availability. It never uses an API key and does not create commerce data.
 
+Then complete the dedicated [Shopify E2E runbook](./SHOPIFY_E2E.md) with the staging development store. That second gate deliberately creates a Shopify cart and therefore requires an explicit confirmation environment variable.
+
 ## Promotion and rollback
 
 Record the tested Git commit before promotion. Promote the same commit to production; do not rebuild from an uncommitted working tree.

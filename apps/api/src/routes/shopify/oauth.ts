@@ -97,6 +97,11 @@ oauthRouter.get('/callback', async (c) => {
     )
   }
 
+  // A merchant must not become active unless lifecycle, inventory, and order
+  // webhooks are registered. Otherwise revoked credentials or stale stock can
+  // remain usable after Shopify believes the app is disconnected.
+  await registerShopifyWebhooks(shop, tokenResult.accessToken)
+
   // Create or update merchant
   const merchant = await prisma.merchant.upsert({
     where: { shopifyDomain: shop },
@@ -136,15 +141,6 @@ oauthRouter.get('/callback', async (c) => {
     create: { userId: user.id, merchantId: merchant.id, role: 'OWNER' },
     update: { role: 'OWNER', revokedAt: null },
   })
-
-  try {
-    await registerShopifyWebhooks(shop, tokenResult.accessToken)
-  } catch (err) {
-    console.warn(
-      `[OAuth] Could not register webhooks for ${shop}:`,
-      err instanceof Error ? err.message : err
-    )
-  }
 
   // Trigger full catalog sync
   await catalogSyncQueue.add('full-catalog-sync', {

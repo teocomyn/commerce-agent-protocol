@@ -5,6 +5,7 @@ import {
   decryptToken,
   encryptToken,
   refreshOfflineAccessToken,
+  validateGrantedScopes,
 } from './shopify.js'
 
 const REFRESH_EARLY_MS = 5 * 60 * 1_000
@@ -47,6 +48,22 @@ export async function getValidShopifyAdminToken(merchantId: string): Promise<str
         merchant.shopifyDomain,
         decryptToken(merchant.shopifyRefreshToken),
       )
+      const missingScopes = validateGrantedScopes(refreshed.grantedScopes)
+      if (missingScopes.length > 0) {
+        await prisma.merchant.update({
+          where: { id: merchantId },
+          data: {
+            shopifyToken: null,
+            shopifyRefreshToken: null,
+            accessTokenExpiresAt: null,
+            refreshTokenExpiresAt: null,
+            grantedScopes: refreshed.grantedScopes,
+          },
+        })
+        throw new Error(
+          `Shopify authorization lost required scopes: ${missingScopes.join(', ')}. Reinstall the app.`,
+        )
+      }
       await prisma.merchant.update({
         where: { id: merchantId },
         data: {

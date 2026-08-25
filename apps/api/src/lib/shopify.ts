@@ -333,13 +333,15 @@ interface ShopifyGraphqlProduct {
       inventoryPolicy: string
     }>
   }
-  images: {
+  media: {
     nodes: Array<{
-      id: string
-      url: string
-      altText: string | null
-      width: number | null
-      height: number | null
+      image: {
+        id: string
+        url: string
+        altText: string | null
+        width: number | null
+        height: number | null
+      } | null
     }>
   }
   metafields: {
@@ -356,7 +358,9 @@ const PRODUCT_FIELDS = /* GraphQL */ `
       selectedOptions { name value }
     }
   }
-  images(first: 50) { nodes { id url altText width height } }
+  media(first: 50) {
+    nodes { ... on MediaImage { image { id url altText width height } } }
+  }
   metafields(first: 20, namespace: "cap") { nodes { namespace key type value } }
 `
 
@@ -406,13 +410,13 @@ function mapGraphqlProduct(product: ShopifyGraphqlProduct, currency: string): Sh
       weight: 0,
       weight_unit: 'kg',
     })),
-    images: product.images.nodes.map((image) => ({
-      id: numericId(image.id),
-      src: image.url,
-      alt: image.altText,
-      width: image.width ?? 0,
-      height: image.height ?? 0,
-    })),
+    images: product.media.nodes.flatMap((media) => media.image ? [{
+      id: numericId(media.image.id),
+      src: media.image.url,
+      alt: media.image.altText,
+      width: media.image.width ?? 0,
+      height: media.image.height ?? 0,
+    }] : []),
     created_at: product.createdAt,
     updated_at: product.updatedAt,
     currency,
@@ -431,11 +435,11 @@ export async function ensureStorefrontAccessToken(
   adminToken: string
 ): Promise<string> {
   const listed = await adminGraphql<{
-    storefrontAccessTokens: { nodes: Array<{ accessToken: string; title: string }> }
+    shop: { storefrontAccessTokens: { nodes: Array<{ accessToken: string; title: string }> } }
   }>(shop, adminToken, `query CapStorefrontTokens {
-    storefrontAccessTokens(first: 50) { nodes { accessToken title } }
+    shop { storefrontAccessTokens(first: 50) { nodes { accessToken title } } }
   }`)
-  const existing = listed.storefrontAccessTokens.nodes.find((token) => token.title === 'CAP')
+  const existing = listed.shop.storefrontAccessTokens.nodes.find((token) => token.title === 'CAP')
   if (existing?.accessToken) return existing.accessToken
 
   const created = await adminGraphql<{
@@ -460,7 +464,7 @@ export async function ensureStorefrontAccessToken(
 // WEBHOOK REGISTRATION
 // ============================================================
 
-const CAP_WEBHOOK_TOPICS = [
+export const CAP_WEBHOOK_TOPICS = [
   'PRODUCTS_CREATE',
   'PRODUCTS_UPDATE',
   'PRODUCTS_DELETE',
@@ -579,7 +583,6 @@ export async function createShopifyCart(
           cost {
             totalAmount { amount currencyCode }
             subtotalAmount { amount currencyCode }
-            totalTaxAmount { amount currencyCode }
           }
         }
         userErrors { code field message }
@@ -637,7 +640,6 @@ export async function createShopifyCart(
           cost: {
             totalAmount: { amount: string; currencyCode: string }
             subtotalAmount: { amount: string; currencyCode: string }
-            totalTaxAmount: { amount: string; currencyCode: string } | null
           }
         } | null
         userErrors: ShopifyCartUserError[]
@@ -669,7 +671,9 @@ export async function createShopifyCart(
     checkoutUrl: cart.checkoutUrl,
     totalAmount: cart.cost.totalAmount.amount,
     subtotalAmount: cart.cost.subtotalAmount.amount,
-    totalTax: cart.cost.totalTaxAmount?.amount ?? null,
+    // Shopify no longer exposes tax and duty estimates on Storefront carts.
+    // The definitive amount is calculated on the hosted checkout.
+    totalTax: null,
     currency: cart.cost.totalAmount.currencyCode,
   }
 }

@@ -7,9 +7,11 @@ import { compareRouter } from '../routes/compare.js'
 import { searchRouter } from '../routes/search.js'
 import { webhookRouter } from '../routes/webhooks.js'
 import { checkoutRouter } from '../routes/checkout.js'
-import { encryptToken } from '../lib/shopify.js'
+import { oauthRouter } from '../routes/shopify/oauth.js'
+import { CAP_WEBHOOK_TOPICS, decryptToken, encryptToken } from '../lib/shopify.js'
 import { redis } from '../lib/redis.js'
 import { catalogSyncQueue, deadLetterQueue, enrichmentQueue } from '../lib/queue.js'
+import { getValidShopifyAdminToken } from '../lib/shopify-token.js'
 
 const createShopifyCartMock = vi.hoisted(() => vi.fn(async (_shop: string, _token: string, input: { trackingToken: string }) => ({
   cartId: 'gid://shopify/Cart/test-cart',
@@ -37,6 +39,8 @@ vi.mock('../lib/shopify.js', async (importOriginal) => {
 
 const suffix = crypto.randomBytes(5).toString('hex')
 const domains = [`cap-test-a-${suffix}.myshopify.com`, `cap-test-b-${suffix}.myshopify.com`]
+const oauthDomain = `cap-oauth-${suffix}.myshopify.com`
+const refreshDomain = `cap-refresh-${suffix}.myshopify.com`
 let merchantA: string
 let merchantB: string
 let productA: string
@@ -189,6 +193,180 @@ describe.sequential('CAP integration boundaries', () => {
     expect(response.status).toBe(200)
     const body = await response.json() as { results: Array<{ id: string }> }
     expect(body.results.map((product) => product.id)).toContain(productA)
+  })
+
+  it('completes the Shopify OAuth lifecycle and blocks callback replay', async () => {
+    process.env.SHOPIFY_API_KEY = 'integration-client-id'
+    process.env.SHOPIFY_SCOPES = 'read_products,read_inventory,read_orders'
+    process.env.SHOPIFY_APP_URL = 'https://api.integration.test'
+    process.env.DASHBOARD_URL = 'https://dashboard.integration.test'
+
+    const install = await oauthRouter.request(`/install?shop=${oauthDomain}`)
+    expect(install.status).toBe(302)
+    const authorizationUrl = new URL(install.headers.get('location')!)
+    const state = authorizationUrl.searchParams.get('state')!
+    expect(authorizationUrl.hostname).toBe(oauthDomain)
+    expect(authorizationUrl.searchParams.get('scope')).toBe(process.env.SHOPIFY_SCOPES)
+
+    const createdTopics: string[] = []
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/admin/oauth/access_token')) {
+        const body = init?.body as URLSearchParams
+        expect(body.get('expiring')).toBe('1')
+        return new Response(JSON.stringify({
+          access_token: 'shpat_oauth_access',
+          refresh_token: 'shprt_oauth_refresh',
+          expires_in: 3600,
+          refresh_token_expires_in: 7_776_000,
+          scope: process.env.SHOPIFY_SCOPES,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+
+      const request = JSON.parse(String(init?.body)) as {
+        query: string
+        variables?: { topic?: string }
+      }
+      expect(init?.headers).toMatchObject({ 'X-Shopify-Access-Token': 'shpat_oauth_access' })
+      if (request.query.includes('CapShopConfiguration')) {
+        return new Response(JSON.stringify({
+          data: { shop: { name: 'CAP OAuth Store', currencyCode: 'EUR' } },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (request.query.includes('CapStorefrontTokens')) {
+        return new Response(JSON.stringify({
+          data: {
+            shop: {
+              storefrontAccessTokens: {
+                nodes: [{ accessToken: 'storefront-oauth', title: 'CAP' }],
+              },
+            },
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (request.query.includes('CapWebhookSubscriptions')) {
+        return new Response(JSON.stringify({
+          data: { webhookSubscriptions: { nodes: [] } },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (request.query.includes('CapWebhookCreate')) {
+        createdTopics.push(request.variables?.topic ?? '')
+        return new Response(JSON.stringify({
+          data: {
+            webhookSubscriptionCreate: {
+              webhookSubscription: { id: `gid://shopify/WebhookSubscription/${createdTopics.length}` },
+              userErrors: [],
+            },
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`Unexpected Shopify request: ${request.query}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const callbackParams = {
+      code: 'oauth-code',
+      shop: oauthDomain,
+      state,
+      timestamp: String(Math.floor(Date.now() / 1000)),
+    }
+    const message = Object.entries(callbackParams)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => `${key}=${value}`)
+      .join('&')
+    const hmac = crypto
+      .createHmac('sha256', 'integration-shopify-secret')
+      .update(message)
+      .digest('hex')
+    const callbackQuery = new URLSearchParams({ ...callbackParams, hmac }).toString()
+
+    try {
+      const callback = await oauthRouter.request(`/callback?${callbackQuery}`)
+      expect(callback.status).toBe(302)
+      expect(new URL(callback.headers.get('location')!).origin).toBe('https://dashboard.integration.test')
+      expect(createdTopics).toEqual([...CAP_WEBHOOK_TOPICS])
+
+      const merchant = await prisma.merchant.findUniqueOrThrow({
+        where: { shopifyDomain: oauthDomain },
+        include: { members: true, dashboardLoginTokens: true },
+      })
+      expect(decryptToken(merchant.shopifyToken!)).toBe('shpat_oauth_access')
+      expect(decryptToken(merchant.shopifyRefreshToken!)).toBe('shprt_oauth_refresh')
+      expect(decryptToken(merchant.storefrontToken!)).toBe('storefront-oauth')
+      expect(merchant.grantedScopes).toEqual(['read_products', 'read_inventory', 'read_orders'])
+      expect(merchant.members).toHaveLength(1)
+      expect(merchant.members[0]).toMatchObject({ role: 'OWNER', revokedAt: null })
+      expect(merchant.dashboardLoginTokens).toHaveLength(1)
+
+      const jobs = await catalogSyncQueue.getJobs(['waiting', 'delayed', 'prioritized'])
+      expect(jobs.some((job) => job.data.merchantId === merchant.id)).toBe(true)
+
+      const replay = await oauthRouter.request(`/callback?${callbackQuery}`)
+      expect(replay.status).toBe(400)
+    } finally {
+      vi.unstubAllGlobals()
+      const merchant = await prisma.merchant.findUnique({ where: { shopifyDomain: oauthDomain } })
+      if (merchant) {
+        const jobs = await catalogSyncQueue.getJobs(['waiting', 'delayed', 'prioritized'])
+        await Promise.all(jobs.filter((job) => job.data.merchantId === merchant.id).map((job) => job.remove()))
+        await prisma.merchant.delete({ where: { id: merchant.id } })
+      }
+    }
+  })
+
+  it('rotates expiring offline credentials and disables an install that loses scopes', async () => {
+    process.env.SHOPIFY_API_KEY = 'integration-client-id'
+    process.env.SHOPIFY_SCOPES = 'read_products,read_inventory,read_orders'
+    const merchant = await prisma.merchant.create({
+      data: {
+        shopifyDomain: refreshDomain,
+        shopifyToken: encryptToken('shpat_expired'),
+        shopifyRefreshToken: encryptToken('shprt_first'),
+        accessTokenExpiresAt: new Date(Date.now() - 60_000),
+        refreshTokenExpiresAt: new Date(Date.now() + 86_400_000),
+        grantedScopes: ['read_products', 'read_inventory', 'read_orders'],
+      },
+    })
+    const responses = [
+      {
+        access_token: 'shpat_rotated',
+        refresh_token: 'shprt_rotated',
+        expires_in: 3600,
+        refresh_token_expires_in: 7_776_000,
+        scope: 'read_products,read_inventory,read_orders',
+      },
+      {
+        access_token: 'shpat_scope_loss',
+        refresh_token: 'shprt_scope_loss',
+        expires_in: 3600,
+        refresh_token_expires_in: 7_776_000,
+        scope: 'read_products,read_inventory',
+      },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(responses.shift()), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    try {
+      expect(await getValidShopifyAdminToken(merchant.id)).toBe('shpat_rotated')
+      const rotated = await prisma.merchant.findUniqueOrThrow({ where: { id: merchant.id } })
+      expect(decryptToken(rotated.shopifyToken!)).toBe('shpat_rotated')
+      expect(decryptToken(rotated.shopifyRefreshToken!)).toBe('shprt_rotated')
+
+      await prisma.merchant.update({
+        where: { id: merchant.id },
+        data: { accessTokenExpiresAt: new Date(Date.now() - 60_000) },
+      })
+      await expect(getValidShopifyAdminToken(merchant.id)).rejects.toThrow(/lost required scopes/)
+      const disabled = await prisma.merchant.findUniqueOrThrow({ where: { id: merchant.id } })
+      expect(disabled.shopifyToken).toBeNull()
+      expect(disabled.shopifyRefreshToken).toBeNull()
+      expect(disabled.grantedScopes).toEqual(['read_products', 'read_inventory'])
+    } finally {
+      vi.unstubAllGlobals()
+      await prisma.merchant.delete({ where: { id: merchant.id } })
+    }
   })
 
   it('processes an inventory webhook once and persists stock', async () => {

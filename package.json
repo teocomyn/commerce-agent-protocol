@@ -21,7 +21,9 @@
     "db:studio": "pnpm --filter=@cap/db db:studio",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore",
     "dev:workers": "pnpm --filter=@cap/api dev:workers",
-    "smoke:staging": "bash scripts/smoke-staging.sh"
+    "smoke:staging": "bash scripts/smoke-staging.sh",
+    "test:shopify": "pnpm --filter @cap/api exec vitest run src/__tests__/shopify-security.test.ts src/__tests__/shopify-contract.test.ts",
+    "e2e:shopify": "bash scripts/shopify-e2e.sh"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
