@@ -6,10 +6,10 @@ import { z } from 'zod'
 export const SearchFiltersSchema = z.object({
   price_min: z.number().min(0).optional(),
   price_max: z.number().min(0).optional(),
-  currency: z.enum(['EUR', 'USD', 'GBP']).optional(),
+  currency: z.string().regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase()).optional(),
   certifications: z.array(z.string()).optional(),
   in_stock: z.boolean().optional(),
-  shipping_country: z.string().length(2).optional(), // ISO 3166-1 alpha-2
+  shipping_country: z.string().regex(/^[A-Za-z]{2}$/).transform((value) => value.toUpperCase()).optional(), // ISO 3166-1 alpha-2
   category: z.string().optional(),
 })
 
@@ -40,7 +40,7 @@ export const CheckoutInitiateSchema = z.object({
   product_id: z.string().uuid(),
   variant_id: z.string().optional(),
   quantity: z.number().int().min(1).max(99).default(1),
-  shipping_country: z.string().length(2).optional().default('FR'),
+  shipping_country: z.string().regex(/^[A-Za-z]{2}$/).transform((value) => value.toUpperCase()).optional().default('FR'),
   /** UUID returned as `agent_query_id` from POST /v1/search — links checkout analytics to the search */
   agent_session_id: z.string().uuid().optional(),
 })
@@ -63,6 +63,13 @@ export interface ProductResult {
     currency: string
     was?: number
   }
+  variants: Array<{
+    id: string
+    title: string
+    price: { amount: number; currency: string }
+    available_quantity: number
+    in_stock: boolean
+  }>
   specs: Record<string, string | number | boolean>
   certifications: string[]
   availability: {
@@ -73,6 +80,7 @@ export interface ProductResult {
     return_days?: number | undefined
     shipping_policy_url?: string | undefined
     return_policy_url?: string | undefined
+    shipping_countries?: string[] | undefined
   }
   images: string[]
   geo_score: number

@@ -10,10 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Signed dashboard accounts with invitations and merchant roles.
 - Authoritative Shopify inventory snapshots with per-location quantities.
 - Shopify shipping and refund policy URLs in search and comparison responses.
+- Variant-level prices, quantities, and availability in search responses.
 
 ### Changed
 - Catalog synchronization uses Shopify Admin GraphQL `2026-07` and asynchronously backfills inventory locations.
 - Checkout and search availability now honor untracked inventory and Shopify's `CONTINUE` selling policy.
+- Shopify shipping destinations are synchronized and enforced before cart creation.
 
 ### Fixed
 - Inventory webhooks no longer replace total stock with a single location's quantity.

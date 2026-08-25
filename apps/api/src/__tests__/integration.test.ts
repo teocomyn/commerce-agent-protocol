@@ -176,8 +176,17 @@ describe.sequential('CAP integration boundaries', () => {
       body: JSON.stringify({ query: 'shoe', sort: 'relevance', filters: { currency: 'EUR', shipping_country: 'FR' } }),
     })
     expect(response.status).toBe(200)
-    const body = await response.json() as { results: Array<{ id: string }> }
+    const body = await response.json() as {
+      results: Array<{
+        id: string
+        variants: Array<{ id: string; price: { amount: number; currency: string } }>
+      }>
+    }
     expect(body.results.map((product) => product.id)).toEqual([productA])
+    expect(body.results[0]?.variants).toEqual([expect.objectContaining({
+      id: '101',
+      price: { amount: 29, currency: 'EUR' },
+    })])
     expect(embeddingsCreateMock).toHaveBeenCalled()
   })
 
@@ -264,7 +273,13 @@ describe.sequential('CAP integration boundaries', () => {
       expect(init?.headers).toMatchObject({ 'X-Shopify-Access-Token': 'shpat_oauth_access' })
       if (request.query.includes('CapShopConfiguration')) {
         return new Response(JSON.stringify({
-          data: { shop: { name: 'CAP OAuth Store', currencyCode: 'EUR' } },
+          data: {
+            shop: {
+              name: 'CAP OAuth Store',
+              currencyCode: 'EUR',
+              shipsToCountries: ['FR', 'BE'],
+            },
+          },
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       if (request.query.includes('CapStorefrontTokens')) {
@@ -328,6 +343,7 @@ describe.sequential('CAP integration boundaries', () => {
       expect(decryptToken(merchant.shopifyRefreshToken!)).toBe('shprt_oauth_refresh')
       expect(decryptToken(merchant.storefrontToken!)).toBe('storefront-oauth')
       expect(merchant.grantedScopes).toEqual(['read_products', 'read_inventory', 'read_orders'])
+      expect(merchant.settings).toMatchObject({ supportedShippingCountries: ['FR', 'BE'] })
       expect(merchant.members).toHaveLength(1)
       expect(merchant.members[0]).toMatchObject({ role: 'OWNER', revokedAt: null })
       expect(merchant.dashboardLoginTokens).toHaveLength(1)
@@ -463,6 +479,21 @@ describe.sequential('CAP integration boundaries', () => {
       'storefront',
       expect.objectContaining({ trackingToken: checkout.trackingToken, shippingCountry: 'FR' }),
     )
+  })
+
+  it('rejects checkout for a country outside Shopify shipping destinations', async () => {
+    const app = new Hono()
+    app.use('/v1/*', authMiddleware)
+    app.route('/v1/checkout', checkoutRouter)
+    const response = await app.request('/v1/checkout/initiate', {
+      method: 'POST',
+      headers: { 'X-CAP-Key': validKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_id: productA, quantity: 1, shipping_country: 'US' }),
+    })
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'SHIPPING_COUNTRY_UNAVAILABLE' },
+    })
   })
 
   it('rate limits a key after its plan quota', async () => {

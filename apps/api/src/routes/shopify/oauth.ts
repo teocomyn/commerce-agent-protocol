@@ -130,6 +130,13 @@ oauthRouter.get('/callback', async (c) => {
       updatedAt: new Date(),
     },
   })
+  await prisma.$executeRaw`
+    UPDATE merchants
+    SET settings = COALESCE(settings, '{}'::jsonb) || ${JSON.stringify({
+      supportedShippingCountries: shopConfiguration.shippingCountries,
+    })}::jsonb
+    WHERE id = ${merchant.id}::uuid
+  `
 
   const user = await prisma.user.upsert({
     where: { externalId: `shopify:${shop}` },

@@ -14,6 +14,7 @@ import {
   ShopifyCartError,
 } from '../lib/shopify.js'
 import { isVariantPurchasable } from '../lib/inventory.js'
+import { supportsShippingCountry } from '../lib/commerce-policies.js'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 10_000, maxRetries: 2 })
 
@@ -50,8 +51,8 @@ const TOOLS: Tool[] = [
         price_min: { type: 'number', description: 'Minimum price' },
         currency: {
           type: 'string',
-          enum: ['EUR', 'USD', 'GBP'],
-          description: 'Currency for price filters',
+          pattern: '^[A-Za-z]{3}$',
+          description: 'ISO 4217 currency code for price filters',
         },
         shipping_country: {
           type: 'string',
@@ -268,7 +269,7 @@ async function handleCommerceCompare(args: Record<string, unknown>) {
     specs: Record<string, unknown>
     geo_score: number
     return_policy: { days?: number; url?: string } | null
-    shipping_info: { estimate?: string; free?: boolean; url?: string } | null
+    shipping_info: { estimate?: string; free?: boolean; url?: string; countries?: string[] } | null
     raw_title: string
   }
 
@@ -310,6 +311,9 @@ async function handleCommerceCompare(args: Record<string, unknown>) {
     )
     matrix['shipping_policy_url'] = Object.fromEntries(
       products.map((p) => [p.id, p.shipping_info?.url ?? null]),
+    )
+    matrix['shipping_countries'] = Object.fromEntries(
+      products.map((p) => [p.id, p.shipping_info?.countries ?? []]),
     )
   }
   if (criteria.includes('specs')) {
@@ -385,6 +389,9 @@ async function handleCommerceCheckout(args: Record<string, unknown>) {
     throw new Error(
       'Storefront token not provisioned for this merchant. Re-install the CAP app.',
     )
+  }
+  if (!supportsShippingCountry(product.shippingInfo, shippingCountry)) {
+    throw new Error(`Merchant does not ship this product to ${shippingCountry}`)
   }
 
   type ShopifyVariantLite = {

@@ -104,7 +104,7 @@ app.get('/openapi.json', async (c) => {
           properties: {
             price_max: { type: 'number' },
             price_min: { type: 'number' },
-            currency: { type: 'string', enum: ['EUR', 'USD', 'GBP'] },
+            currency: { type: 'string', pattern: '^[A-Za-z]{3}$' },
             certifications: { type: 'array', items: { type: 'string' } },
             in_stock: { type: 'boolean' },
             shipping_country: { type: 'string', minLength: 2, maxLength: 2 },
@@ -113,6 +113,7 @@ app.get('/openapi.json', async (c) => {
         },
         ProductResult: {
           type: 'object',
+          required: ['id', 'title', 'merchant', 'price', 'variants', 'availability'],
           properties: {
             id: { type: 'string', format: 'uuid' },
             title: { type: 'string' },
@@ -132,6 +133,20 @@ app.get('/openapi.json', async (c) => {
                 was: { type: 'number' },
               },
             },
+            variants: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['id', 'title', 'price', 'available_quantity', 'in_stock'],
+                properties: {
+                  id: { type: 'string' },
+                  title: { type: 'string' },
+                  price: { $ref: '#/components/schemas/Money' },
+                  available_quantity: { type: 'integer' },
+                  in_stock: { type: 'boolean' },
+                },
+              },
+            },
             specs: { type: 'object', additionalProperties: true },
             certifications: { type: 'array', items: { type: 'string' } },
             availability: {
@@ -143,6 +158,10 @@ app.get('/openapi.json', async (c) => {
                 return_days: { type: 'integer' },
                 shipping_policy_url: { type: 'string', format: 'uri' },
                 return_policy_url: { type: 'string', format: 'uri' },
+                shipping_countries: {
+                  type: 'array',
+                  items: { type: 'string', minLength: 2, maxLength: 2 },
+                },
               },
             },
             images: { type: 'array', items: { type: 'string' } },

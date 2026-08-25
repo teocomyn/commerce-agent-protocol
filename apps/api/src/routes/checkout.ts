@@ -12,6 +12,7 @@ import {
 } from '../lib/shopify.js'
 import { capJsonValidator } from '../lib/validation.js'
 import { isVariantPurchasable } from '../lib/inventory.js'
+import { supportsShippingCountry } from '../lib/commerce-policies.js'
 
 const checkoutRouter = new Hono()
 
@@ -71,6 +72,15 @@ checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async
         message: 'API key is not authorized for this merchant',
       },
     }, 403)
+  }
+
+  if (!supportsShippingCountry(product.shippingInfo, shipping_country)) {
+    return c.json<CAPError>({
+      error: {
+        code: 'SHIPPING_COUNTRY_UNAVAILABLE',
+        message: `Merchant does not ship this product to ${shipping_country.toUpperCase()}`,
+      },
+    }, 422)
   }
 
   if (!product.merchant.storefrontToken) {

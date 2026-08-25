@@ -34,9 +34,9 @@ References: [offline access tokens](https://shopify.dev/docs/apps/build/authenti
 
 1. Open `https://api-staging.cap-protocol.org/shopify/install?shop=STORE.myshopify.com` and approve every requested scope.
 2. Confirm the redirect reaches the staging dashboard without exposing a `merchant_id` selector.
-3. Wait for both worker queues to settle, create a staging API key, and verify a known product appears in `/v1/search` with the right currency and variant price.
-4. Change inventory for that variant in Shopify. Confirm the `inventory_levels/update` webhook changes CAP availability and invalidates cached search results.
-5. Run the guarded cart check below. Open the returned URL and place a Shopify test order.
+3. Wait for both worker queues to settle, create a staging API key, and verify a known product appears in `/v1/search` with the right currency, every variant price, and the expected `shipping_countries`.
+4. Change inventory for that variant at one Shopify location. Confirm the `inventory_levels/update` webhook changes only that location, the catalog worker refreshes the authoritative total, and cached search results are invalidated.
+5. Attempt checkout with a country outside `shipping_countries` and confirm CAP returns `SHIPPING_COUNTRY_UNAVAILABLE`; then run the guarded cart check below for a supported country, open the returned URL, and place a Shopify test order.
 6. Confirm `orders/create` sets the tracked CAP checkout to `ordered`, and `orders/paid` sets it to `completed` using the deterministic cart attribute—not an amount match.
 7. Redeliver one webhook from Shopify and confirm there is only one completed `webhook_events` record and no duplicate enrichment work.
 8. Uninstall the app. Confirm the Admin, refresh, and Storefront tokens are cleared; dashboard memberships and API keys are revoked; an already-cached API key immediately returns `401`.

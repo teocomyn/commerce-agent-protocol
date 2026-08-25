@@ -163,7 +163,7 @@ components:
       properties:
         price_min:        { type: number, minimum: 0 }
         price_max:        { type: number, minimum: 0 }
-        currency:         { type: string, enum: [EUR, USD, GBP] }
+        currency:         { type: string, pattern: '^[A-Za-z]{3}$' }
         certifications:   { type: array, items: { type: string } }
         in_stock:         { type: boolean }
         shipping_country: { type: string, minLength: 2, maxLength: 2 }
@@ -196,10 +196,11 @@ components:
         return_days:       { type: integer }
         shipping_policy_url: { type: string, format: uri }
         return_policy_url: { type: string, format: uri }
+        shipping_countries: { type: array, items: { type: string, minLength: 2, maxLength: 2 } }
 
     ProductResult:
       type: object
-      required: [id, title, merchant, price, availability, checkout_url, geo_score]
+      required: [id, title, merchant, price, variants, availability, checkout_url, geo_score]
       properties:
         id:    { type: string }
         title: { type: string }
@@ -211,6 +212,17 @@ components:
             domain:      { type: string }
             trust_score: { type: number }
         price:        { $ref: '#/components/schemas/Money' }
+        variants:
+          type: array
+          items:
+            type: object
+            required: [id, title, price, available_quantity, in_stock]
+            properties:
+              id: { type: string }
+              title: { type: string }
+              price: { $ref: '#/components/schemas/Money' }
+              available_quantity: { type: integer }
+              in_stock: { type: boolean }
         specs:        { type: object, additionalProperties: true }
         certifications: { type: array, items: { type: string } }
         availability: { $ref: '#/components/schemas/Availability' }

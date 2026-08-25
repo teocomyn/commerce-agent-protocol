@@ -21,7 +21,13 @@ compareRouter.post('/', capJsonValidator(CompareRequestSchema), async (c) => {
     specs: Record<string, string | number | boolean>
     geo_score: number
     return_policy: { days?: number; url?: string } | null
-    shipping_info: { estimate?: string; free?: boolean; days?: number; url?: string } | null
+    shipping_info: {
+      estimate?: string
+      free?: boolean
+      days?: number
+      url?: string
+      countries?: string[]
+    } | null
     raw_title: string
   }
 
@@ -67,10 +73,12 @@ compareRouter.post('/', capJsonValidator(CompareRequestSchema), async (c) => {
     matrix['shipping_estimate'] = {}
     matrix['free_shipping'] = {}
     matrix['shipping_policy_url'] = {}
+    matrix['shipping_countries'] = {}
     for (const p of products) {
       matrix['shipping_estimate']![p.id] = p.shipping_info?.estimate ?? 'unknown'
       matrix['free_shipping']![p.id] = p.shipping_info?.free ?? false
       matrix['shipping_policy_url']![p.id] = p.shipping_info?.url ?? null
+      matrix['shipping_countries']![p.id] = p.shipping_info?.countries ?? []
     }
   }
 

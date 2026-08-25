@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractCommercePolicies } from '../lib/commerce-policies.js'
+import { extractCommercePolicies, supportsShippingCountry } from '../lib/commerce-policies.js'
 import { extractCheckoutTrackingToken } from '../lib/webhook-utils.js'
 
 describe('commerce metadata normalization', () => {
@@ -50,6 +50,20 @@ describe('commerce metadata normalization', () => {
       [{ key: 'return_days', value: '30' }],
       [{ type: 'REFUND_POLICY', title: 'Refunds', body: 'Policy', url: 'https://store/refund' }],
     ).returnPolicy).toEqual({ days: 30 })
+  })
+
+  it('uses Shopify shipping destinations as the authoritative country list', () => {
+    expect(extractCommercePolicies(
+      [{ key: 'shipping_countries', value: 'US' }],
+      [],
+      ['fr', 'BE', 'FR', 'invalid'],
+    ).shippingInfo).toEqual({ countries: ['FR', 'BE'] })
+  })
+
+  it('checks shipping destinations without blocking unknown legacy policies', () => {
+    expect(supportsShippingCountry({ countries: ['FR', 'BE'] }, 'fr')).toBe(true)
+    expect(supportsShippingCountry({ countries: ['FR', 'BE'] }, 'US')).toBe(false)
+    expect(supportsShippingCountry(null, 'US')).toBe(true)
   })
 
   it('ignores invalid JSON policy objects', () => {

@@ -222,7 +222,7 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
     price_max: string | null
     currency: string
     geo_score: number
-    shipping_info: { free?: boolean; estimate?: string; url?: string } | null
+    shipping_info: { free?: boolean; estimate?: string; url?: string; countries?: string[] } | null
     return_policy: { days?: number; url?: string } | null
     merchant_id: string
     shopify_domain: string
@@ -230,6 +230,7 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
     raw_title: string
     raw_images: Array<{ src: string; alt?: string }> | null
     raw_variants: Array<{
+      id: number
       price: string
       inventory_quantity: number
       inventory_management?: string | null
@@ -264,8 +265,12 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
 
   // Format results
   const results = rawResults.map(row => {
-    const firstVariant = Array.isArray(row.raw_variants) ? row.raw_variants[0] : null
-    const priceAmount = firstVariant ? parseFloat(firstVariant.price) : (row.price_min ? parseFloat(row.price_min) : 0)
+    const rawVariants = Array.isArray(row.raw_variants) ? row.raw_variants : []
+    const displayVariant = rawVariants.find((variant) => isVariantPurchasable(variant)) ?? rawVariants[0]
+    const parsedPrice = displayVariant
+      ? Number.parseFloat(displayVariant.price)
+      : row.price_min ? Number.parseFloat(row.price_min) : 0
+    const priceAmount = Number.isFinite(parsedPrice) ? parsedPrice : 0
     const images = Array.isArray(row.raw_images) ? row.raw_images.map(img => img.src) : []
 
     return {
@@ -280,6 +285,19 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
         amount: priceAmount,
         currency: row.currency ?? 'EUR',
       },
+      variants: rawVariants.map((variant) => {
+        const amount = Number.parseFloat(variant.price)
+        return {
+          id: String(variant.id),
+          title: variant.title,
+          price: {
+            amount: Number.isFinite(amount) ? amount : 0,
+            currency: row.currency ?? 'EUR',
+          },
+          available_quantity: variant.inventory_quantity ?? 0,
+          in_stock: isVariantPurchasable(variant),
+        }
+      }),
       specs: row.specs ?? {},
       certifications: row.certifications ?? [],
       availability: {
@@ -289,6 +307,7 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
         return_days: row.return_policy?.days,
         shipping_policy_url: row.shipping_info?.url,
         return_policy_url: row.return_policy?.url,
+        shipping_countries: row.shipping_info?.countries,
       },
       images,
       geo_score: row.geo_score,

@@ -73,8 +73,9 @@ describe('shared CAP schemas and utilities', () => {
     expect(SearchRequestSchema.safeParse({ query: 'x', sort }).success).toBe(true)
   })
 
-  it('rejects unsupported currencies', () => {
-    expect(SearchRequestSchema.safeParse({ query: 'x', filters: { currency: 'BTC' } }).success).toBe(false)
+  it('normalizes ISO currency codes beyond the initial EUR/USD/GBP set', () => {
+    expect(SearchRequestSchema.parse({ query: 'x', filters: { currency: 'cad' } }).filters.currency).toBe('CAD')
+    expect(SearchRequestSchema.safeParse({ query: 'x', filters: { currency: 'EURO' } }).success).toBe(false)
   })
 
   it('normalizes checkout defaults without mutating the input', () => {

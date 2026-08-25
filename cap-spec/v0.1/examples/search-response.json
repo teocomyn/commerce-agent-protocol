@@ -9,6 +9,15 @@
         "trust_score": 92
       },
       "price": { "amount": 110.0, "currency": "EUR" },
+      "variants": [
+        {
+          "id": "43729076",
+          "title": "42",
+          "price": { "amount": 110.0, "currency": "EUR" },
+          "available_quantity": 3,
+          "in_stock": true
+        }
+      ],
       "specs": {
         "upper_material": "leather (chrome-free)",
         "outsole_material": "rubber",
@@ -20,7 +29,10 @@
         "sizes": ["41", "42", "43", "44"],
         "shipping_estimate": "2-4 business days",
         "free_shipping": true,
-        "return_days": 30
+        "return_days": 30,
+        "shipping_countries": ["FR", "BE"],
+        "shipping_policy_url": "https://veja-store.myshopify.com/policies/shipping-policy",
+        "return_policy_url": "https://veja-store.myshopify.com/policies/refund-policy"
       },
       "images": [
         "https://cdn.shopify.com/.../campo-white-1.jpg"

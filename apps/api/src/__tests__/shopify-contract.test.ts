@@ -153,6 +153,7 @@ describe('Shopify HTTP and GraphQL contracts', () => {
       data: {
         shop: {
           currencyCode: 'EUR',
+          shipsToCountries: ['FR', 'BE'],
           shopPolicies: [{
             type: 'REFUND_POLICY',
             title: 'Refunds',
@@ -209,6 +210,7 @@ describe('Shopify HTTP and GraphQL contracts', () => {
         inventory_levels: [],
       }],
       shop_policies: [{ type: 'REFUND_POLICY', title: 'Refunds' }],
+      shipping_countries: ['FR', 'BE'],
     })
     expect(page.nextPageInfo).toBeUndefined()
   })

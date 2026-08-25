@@ -121,13 +121,20 @@ export function isValidShopDomain(shop: string): boolean {
 export async function fetchShopConfiguration(shop: string, token: string): Promise<{
   name: string
   currency: string
+  shippingCountries: string[]
 }> {
-  const data = await adminGraphql<{ shop: { name: string; currencyCode: string } }>(
+  const data = await adminGraphql<{
+    shop: { name: string; currencyCode: string; shipsToCountries: string[] }
+  }>(
     shop,
     token,
-    'query CapShopConfiguration { shop { name currencyCode } }',
+    'query CapShopConfiguration { shop { name currencyCode shipsToCountries } }',
   )
-  return { name: data.shop.name, currency: data.shop.currencyCode }
+  return {
+    name: data.shop.name,
+    currency: data.shop.currencyCode,
+    shippingCountries: data.shop.shipsToCountries ?? [],
+  }
 }
 
 export interface ShopifyOfflineTokenResult {
@@ -272,6 +279,7 @@ export interface ShopifyProduct {
   currency: string
   metafields: Array<{ namespace: string; key: string; type: string; value: string }>
   shop_policies: Array<{ type: string; title: string; body: string; url: string }>
+  shipping_countries: string[]
 }
 
 export interface ShopifyProductsPage {
@@ -285,7 +293,11 @@ export async function fetchShopifyProducts(
   pageInfo?: string
 ): Promise<ShopifyProductsPage> {
   const data = await adminGraphql<{
-    shop: { currencyCode: string; shopPolicies?: ShopifyGraphqlPolicy[] }
+    shop: {
+      currencyCode: string
+      shipsToCountries?: string[]
+      shopPolicies?: ShopifyGraphqlPolicy[]
+    }
     products: {
       nodes: ShopifyGraphqlProduct[]
       pageInfo: { hasNextPage: boolean; endCursor: string | null }
@@ -297,6 +309,7 @@ export async function fetchShopifyProducts(
       product,
       data.shop.currencyCode,
       data.shop.shopPolicies ?? [],
+      data.shop.shipsToCountries ?? [],
     )),
     nextPageInfo: data.products.pageInfo.hasNextPage
       ? data.products.pageInfo.endCursor ?? undefined
@@ -313,11 +326,20 @@ export async function fetchShopifyProduct(
     ? String(productId)
     : `gid://shopify/Product/${productId}`
   const data = await adminGraphql<{
-    shop: { currencyCode: string; shopPolicies?: ShopifyGraphqlPolicy[] }
+    shop: {
+      currencyCode: string
+      shipsToCountries?: string[]
+      shopPolicies?: ShopifyGraphqlPolicy[]
+    }
     product: ShopifyGraphqlProduct | null
   }>(shop, token, PRODUCT_QUERY, { id: gid })
   if (!data.product) throw new Error(`Shopify product ${productId} not found`)
-  return mapGraphqlProduct(data.product, data.shop.currencyCode, data.shop.shopPolicies ?? [])
+  return mapGraphqlProduct(
+    data.product,
+    data.shop.currencyCode,
+    data.shop.shopPolicies ?? [],
+    data.shop.shipsToCountries ?? [],
+  )
 }
 
 interface ShopifyGraphqlPolicy {
@@ -389,7 +411,7 @@ const PRODUCT_FIELDS = /* GraphQL */ `
 
 const PRODUCT_LIST_QUERY = /* GraphQL */ `
   query CapProducts($cursor: String) {
-    shop { currencyCode shopPolicies { type title body url } }
+    shop { currencyCode shipsToCountries shopPolicies { type title body url } }
     products(first: 100, after: $cursor, sortKey: UPDATED_AT) {
       nodes { ${PRODUCT_FIELDS} }
       pageInfo { hasNextPage endCursor }
@@ -399,7 +421,7 @@ const PRODUCT_LIST_QUERY = /* GraphQL */ `
 
 const PRODUCT_QUERY = /* GraphQL */ `
   query CapProduct($id: ID!) {
-    shop { currencyCode shopPolicies { type title body url } }
+    shop { currencyCode shipsToCountries shopPolicies { type title body url } }
     product(id: $id) { ${PRODUCT_FIELDS} }
   }
 `
@@ -486,6 +508,7 @@ function mapGraphqlProduct(
   product: ShopifyGraphqlProduct,
   currency: string,
   shopPolicies: ShopifyGraphqlPolicy[],
+  shippingCountries: string[],
 ): ShopifyProduct {
   return {
     id: Number(product.legacyResourceId || numericId(product.id)),
@@ -525,6 +548,7 @@ function mapGraphqlProduct(
     currency,
     metafields: product.metafields.nodes,
     shop_policies: shopPolicies,
+    shipping_countries: shippingCountries,
   }
 }
 
