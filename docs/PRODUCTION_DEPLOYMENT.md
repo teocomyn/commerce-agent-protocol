@@ -35,6 +35,8 @@ In Shopify Partner Dashboard, configure:
 
 The app uses Admin GraphQL `2026-07`, offline expiring tokens with refresh rotation, and checks that the granted scopes include every requested scope before activating the merchant.
 
+Keep `SHOPIFY_SCOPES` aligned with `.env.example`. Multi-location stock and policy synchronization require `read_locations`, `read_legal_policies`, and `read_markets_home`; existing stores must re-authorize after those scopes are added.
+
 ## Release gate
 
 ```bash

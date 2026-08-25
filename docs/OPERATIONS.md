@@ -31,6 +31,8 @@ The metrics response uses the Prometheus text format and exposes only low-cardin
 
 Alert immediately when `/ready` is non-200, the dead-letter queue is non-empty, a queue has failed jobs, or webhook `failed` events increase. Alert on sustained waiting-job growth only after setting a baseline from staging traffic.
 
+The `catalog-sync` queue contains both full catalog pulls and authoritative inventory snapshots. An `inventory_levels/update` webhook applies a fail-closed local update immediately, then schedules an `inventory-level-sync` job to refresh the total and per-location quantities from Admin GraphQL. A sustained inventory-job backlog means checkout availability may remain conservatively unavailable until the catalog worker catches up.
+
 ## Dead-letter inspection and replay
 
 List at most 100 recent entries:

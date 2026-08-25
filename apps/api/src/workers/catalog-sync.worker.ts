@@ -1,14 +1,47 @@
 import { Worker } from 'bullmq'
-import { prisma } from '@cap/db'
-import { bullmqConnection, enrichmentQueue, sendToDeadLetter, type CatalogSyncJobData } from '../lib/queue.js'
-import { fetchShopifyProducts } from '../lib/shopify.js'
+import { prisma, type Prisma } from '@cap/db'
+import { bullmqConnection, catalogSyncQueue, enrichmentQueue, sendToDeadLetter, type CatalogSyncJobData } from '../lib/queue.js'
+import { fetchShopifyInventorySnapshot, fetchShopifyProducts } from '../lib/shopify.js'
 import { getValidShopifyAdminToken } from '../lib/shopify-token.js'
+import { applyInventorySnapshot } from '../lib/inventory.js'
+import { invalidateMerchantSearchCache } from '../lib/redis.js'
 
 export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
   'catalog-sync',
   async (job) => {
-    const { merchantId, shopDomain, cursor } = job.data
+    const { merchantId, shopDomain } = job.data
     const token = await getValidShopifyAdminToken(merchantId)
+
+    if (job.data.kind === 'inventory') {
+      const snapshot = await fetchShopifyInventorySnapshot(
+        shopDomain,
+        token,
+        job.data.inventoryItemId,
+      )
+      const products = await prisma.$queryRaw<Array<{ id: string; variants: unknown }>>`
+        SELECT id, variants
+        FROM products_raw
+        WHERE merchant_id = ${merchantId}::uuid
+          AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements(variants) AS variant
+            WHERE variant->>'inventory_item_id' = ${String(snapshot.inventory_item_id)}
+          )
+      `
+      if (products.length === 0) {
+        throw new Error(`Inventory item ${snapshot.inventory_item_id} is not normalized yet`)
+      }
+      await prisma.$transaction(products.map((product) => prisma.productRaw.update({
+        where: { id: product.id },
+        data: {
+          variants: applyInventorySnapshot(product.variants, snapshot) as Prisma.InputJsonValue,
+          syncedAt: new Date(),
+        },
+      })))
+      await invalidateMerchantSearchCache(merchantId)
+      return { inventoryItemId: snapshot.inventory_item_id, productsUpdated: products.length }
+    }
+
+    const { cursor } = job.data
 
     console.log(`[CatalogSync] Starting sync for ${shopDomain} (cursor: ${cursor ?? 'start'})`)
 
@@ -39,6 +72,19 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
       }))
 
       await enrichmentQueue.addBulk(enrichmentJobs)
+
+      const inventoryItemIds = new Set(products.flatMap((product) => product.variants.flatMap(
+        (variant) => variant.inventory_item_id == null ? [] : [String(variant.inventory_item_id)],
+      )))
+      await catalogSyncQueue.addBulk([...inventoryItemIds].map((inventoryItemId) => ({
+        name: 'inventory-level-sync',
+        data: { merchantId, shopDomain, kind: 'inventory' as const, inventoryItemId },
+        opts: {
+          priority: 2,
+          delay: 30_000,
+          jobId: `initial-inventory-${merchantId}-${inventoryItemId}-${job.id}`,
+        },
+      })))
 
       totalProcessed += products.length
       pageInfo = nextPageInfo

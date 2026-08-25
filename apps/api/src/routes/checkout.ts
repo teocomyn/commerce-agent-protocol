@@ -11,6 +11,7 @@ import {
   ShopifyCartError,
 } from '../lib/shopify.js'
 import { capJsonValidator } from '../lib/validation.js'
+import { isVariantPurchasable } from '../lib/inventory.js'
 
 const checkoutRouter = new Hono()
 
@@ -89,6 +90,8 @@ checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async
     id: number
     title?: string
     inventory_quantity?: number
+    inventory_management?: string | null
+    inventory_policy?: string | null
     price?: string
   }
   const variants = Array.isArray(product.productRaw.variants)
@@ -103,7 +106,7 @@ checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async
     chosenVariant = variants.find((v) => String(v.id) === String(wanted))
   } else {
     chosenVariant =
-      variants.find((v) => (v.inventory_quantity ?? 0) >= quantity) ??
+      variants.find((v) => isVariantPurchasable(v, quantity)) ??
       variants[0]
   }
 
@@ -118,7 +121,7 @@ checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async
     }, 404)
   }
 
-  if ((chosenVariant.inventory_quantity ?? 0) < quantity) {
+  if (!isVariantPurchasable(chosenVariant, quantity)) {
     return c.json<CAPError>({
       error: {
         code: 'OUT_OF_STOCK',

@@ -236,6 +236,12 @@ export interface ShopifyVariant {
   sku: string | null
   inventory_quantity: number
   inventory_management: string | null
+  inventory_policy: string
+  inventory_levels: Array<{
+    location_id: number
+    location_name: string
+    available: number
+  }>
   option1: string | null
   option2: string | null
   option3: string | null
@@ -265,6 +271,7 @@ export interface ShopifyProduct {
   updated_at: string
   currency: string
   metafields: Array<{ namespace: string; key: string; type: string; value: string }>
+  shop_policies: Array<{ type: string; title: string; body: string; url: string }>
 }
 
 export interface ShopifyProductsPage {
@@ -278,7 +285,7 @@ export async function fetchShopifyProducts(
   pageInfo?: string
 ): Promise<ShopifyProductsPage> {
   const data = await adminGraphql<{
-    shop: { currencyCode: string }
+    shop: { currencyCode: string; shopPolicies?: ShopifyGraphqlPolicy[] }
     products: {
       nodes: ShopifyGraphqlProduct[]
       pageInfo: { hasNextPage: boolean; endCursor: string | null }
@@ -286,7 +293,11 @@ export async function fetchShopifyProducts(
   }>(shop, token, PRODUCT_LIST_QUERY, { cursor: pageInfo ?? null })
 
   return {
-    products: data.products.nodes.map((product) => mapGraphqlProduct(product, data.shop.currencyCode)),
+    products: data.products.nodes.map((product) => mapGraphqlProduct(
+      product,
+      data.shop.currencyCode,
+      data.shop.shopPolicies ?? [],
+    )),
     nextPageInfo: data.products.pageInfo.hasNextPage
       ? data.products.pageInfo.endCursor ?? undefined
       : undefined,
@@ -302,11 +313,18 @@ export async function fetchShopifyProduct(
     ? String(productId)
     : `gid://shopify/Product/${productId}`
   const data = await adminGraphql<{
-    shop: { currencyCode: string }
+    shop: { currencyCode: string; shopPolicies?: ShopifyGraphqlPolicy[] }
     product: ShopifyGraphqlProduct | null
   }>(shop, token, PRODUCT_QUERY, { id: gid })
   if (!data.product) throw new Error(`Shopify product ${productId} not found`)
-  return mapGraphqlProduct(data.product, data.shop.currencyCode)
+  return mapGraphqlProduct(data.product, data.shop.currencyCode, data.shop.shopPolicies ?? [])
+}
+
+interface ShopifyGraphqlPolicy {
+  type: string
+  title: string
+  body: string
+  url: string
 }
 
 interface ShopifyGraphqlProduct {
@@ -328,7 +346,10 @@ interface ShopifyGraphqlProduct {
       price: string
       sku: string | null
       inventoryQuantity: number | null
-      inventoryItem: { legacyResourceId: string; tracked: boolean } | null
+      inventoryItem: {
+        legacyResourceId: string
+        tracked: boolean
+      } | null
       selectedOptions: Array<{ name: string; value: string }>
       inventoryPolicy: string
     }>
@@ -354,7 +375,9 @@ const PRODUCT_FIELDS = /* GraphQL */ `
   variants(first: 250) {
     nodes {
       id legacyResourceId title price sku inventoryQuantity inventoryPolicy
-      inventoryItem { legacyResourceId tracked }
+      inventoryItem {
+        legacyResourceId tracked
+      }
       selectedOptions { name value }
     }
   }
@@ -366,7 +389,7 @@ const PRODUCT_FIELDS = /* GraphQL */ `
 
 const PRODUCT_LIST_QUERY = /* GraphQL */ `
   query CapProducts($cursor: String) {
-    shop { currencyCode }
+    shop { currencyCode shopPolicies { type title body url } }
     products(first: 100, after: $cursor, sortKey: UPDATED_AT) {
       nodes { ${PRODUCT_FIELDS} }
       pageInfo { hasNextPage endCursor }
@@ -376,7 +399,7 @@ const PRODUCT_LIST_QUERY = /* GraphQL */ `
 
 const PRODUCT_QUERY = /* GraphQL */ `
   query CapProduct($id: ID!) {
-    shop { currencyCode }
+    shop { currencyCode shopPolicies { type title body url } }
     product(id: $id) { ${PRODUCT_FIELDS} }
   }
 `
@@ -385,7 +408,85 @@ function numericId(gidOrId: string): number {
   return Number(gidOrId.split('/').pop())
 }
 
-function mapGraphqlProduct(product: ShopifyGraphqlProduct, currency: string): ShopifyProduct {
+export interface ShopifyInventorySnapshot {
+  inventory_item_id: number
+  variant_id: number
+  inventory_quantity: number
+  inventory_management: string | null
+  inventory_policy: string
+  inventory_levels: Array<{
+    location_id: number
+    location_name: string
+    available: number
+  }>
+}
+
+const INVENTORY_ITEM_QUERY = /* GraphQL */ `
+  query CapInventoryItem($id: ID!) {
+    inventoryItem(id: $id) {
+      legacyResourceId tracked
+      variants(first: 1) { nodes { legacyResourceId inventoryQuantity inventoryPolicy } }
+      inventoryLevels(first: 250) {
+        nodes {
+          location { legacyResourceId name isActive }
+          quantities(names: ["available"]) { name quantity }
+        }
+      }
+    }
+  }
+`
+
+export async function fetchShopifyInventorySnapshot(
+  shop: string,
+  token: string,
+  inventoryItemId: string | number,
+): Promise<ShopifyInventorySnapshot> {
+  const gid = String(inventoryItemId).startsWith('gid://')
+    ? String(inventoryItemId)
+    : `gid://shopify/InventoryItem/${inventoryItemId}`
+  const data = await adminGraphql<{
+    inventoryItem: {
+      legacyResourceId: string
+      tracked: boolean
+      variants: { nodes: Array<{
+        legacyResourceId: string
+        inventoryQuantity: number | null
+        inventoryPolicy: string
+      }> }
+      inventoryLevels: {
+        nodes: Array<{
+          location: { legacyResourceId: string; name: string; isActive: boolean }
+          quantities: Array<{ name: string; quantity: number }>
+        }>
+      }
+    } | null
+  }>(shop, token, INVENTORY_ITEM_QUERY, { id: gid })
+  const variant = data.inventoryItem?.variants.nodes[0]
+  if (!data.inventoryItem || !variant) {
+    throw new Error(`Shopify inventory item ${inventoryItemId} has no product variant`)
+  }
+  const inventoryLevels = data.inventoryItem.inventoryLevels.nodes
+    .filter((level) => level.location.isActive)
+    .map((level) => ({
+      location_id: Number(level.location.legacyResourceId),
+      location_name: level.location.name,
+      available: level.quantities.find((quantity) => quantity.name === 'available')?.quantity ?? 0,
+    }))
+  return {
+    inventory_item_id: Number(data.inventoryItem.legacyResourceId),
+    variant_id: Number(variant.legacyResourceId),
+    inventory_quantity: inventoryLevels.reduce((total, level) => total + level.available, 0),
+    inventory_management: data.inventoryItem.tracked ? 'shopify' : null,
+    inventory_policy: variant.inventoryPolicy,
+    inventory_levels: inventoryLevels,
+  }
+}
+
+function mapGraphqlProduct(
+  product: ShopifyGraphqlProduct,
+  currency: string,
+  shopPolicies: ShopifyGraphqlPolicy[],
+): ShopifyProduct {
   return {
     id: Number(product.legacyResourceId || numericId(product.id)),
     title: product.title,
@@ -404,6 +505,8 @@ function mapGraphqlProduct(product: ShopifyGraphqlProduct, currency: string): Sh
       sku: variant.sku,
       inventory_quantity: variant.inventoryQuantity ?? 0,
       inventory_management: variant.inventoryItem?.tracked ? 'shopify' : null,
+      inventory_policy: variant.inventoryPolicy,
+      inventory_levels: [],
       option1: variant.selectedOptions[0]?.value ?? null,
       option2: variant.selectedOptions[1]?.value ?? null,
       option3: variant.selectedOptions[2]?.value ?? null,
@@ -421,6 +524,7 @@ function mapGraphqlProduct(product: ShopifyGraphqlProduct, currency: string): Sh
     updated_at: product.updatedAt,
     currency,
     metafields: product.metafields.nodes,
+    shop_policies: shopPolicies,
   }
 }
 

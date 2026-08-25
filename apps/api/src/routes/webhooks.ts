@@ -1,10 +1,11 @@
 import crypto from 'node:crypto'
 import { Hono } from 'hono'
-import { prisma } from '@cap/db'
+import { prisma, type Prisma } from '@cap/db'
 import { verifyShopifyWebhook } from '../lib/shopify.js'
-import { enrichmentQueue } from '../lib/queue.js'
+import { catalogSyncQueue, enrichmentQueue } from '../lib/queue.js'
 import { invalidateMerchantSearchCache, redis } from '../lib/redis.js'
 import { extractCheckoutTrackingToken } from '../lib/webhook-utils.js'
+import { applyInventoryLevelUpdate } from '../lib/inventory.js'
 
 const webhookRouter = new Hono()
 
@@ -139,26 +140,44 @@ async function processWebhook(args: {
 
     case 'inventory_levels/update': {
       const inventoryItemId = String(payload['inventory_item_id'] ?? '')
-      const available = Number(payload['available'] ?? 0)
-      if (!inventoryItemId || !Number.isFinite(available)) throw new Error('Invalid inventory payload')
-      await prisma.$executeRaw`
-        UPDATE products_raw pr
-        SET variants = (
-          SELECT jsonb_agg(
-            CASE
-              WHEN variant->>'inventory_item_id' = ${inventoryItemId}
-              THEN jsonb_set(variant, '{inventory_quantity}', to_jsonb(${available}::int), true)
-              ELSE variant
-            END
-          )
-          FROM jsonb_array_elements(pr.variants) AS variant
-        ), synced_at = NOW()
-        WHERE pr.merchant_id = ${merchantId}::uuid
+      const locationId = payload['location_id'] == null ? null : String(payload['location_id'])
+      const available = Number(payload['available'])
+      if (!inventoryItemId || payload['available'] == null || !Number.isFinite(available)) {
+        throw new Error('Invalid inventory payload')
+      }
+      const products = await prisma.$queryRaw<Array<{ id: string; variants: unknown }>>`
+        SELECT id, variants
+        FROM products_raw
+        WHERE merchant_id = ${merchantId}::uuid
           AND EXISTS (
-            SELECT 1 FROM jsonb_array_elements(pr.variants) AS variant
+            SELECT 1 FROM jsonb_array_elements(variants) AS variant
             WHERE variant->>'inventory_item_id' = ${inventoryItemId}
           )
       `
+      await prisma.$transaction(products.map((product) => prisma.productRaw.update({
+        where: { id: product.id },
+        data: {
+          variants: applyInventoryLevelUpdate(
+            product.variants,
+            inventoryItemId,
+            locationId,
+            available,
+          ) as Prisma.InputJsonValue,
+          syncedAt: new Date(),
+        },
+      })))
+      await catalogSyncQueue.add(
+        'inventory-level-sync',
+        { merchantId, shopDomain, kind: 'inventory', inventoryItemId },
+        {
+          priority: 1,
+          jobId: `inventory-${merchantId}-${inventoryItemId}-${crypto
+            .createHash('sha256')
+            .update(webhookId)
+            .digest('hex')
+            .slice(0, 16)}`,
+        },
+      )
       await invalidateMerchantSearchCache(merchantId)
       break
     }

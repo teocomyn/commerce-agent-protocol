@@ -4,6 +4,7 @@ import { SearchRequestSchema, type SearchResponse } from '@cap/shared'
 import { cacheGet, cacheSet } from '../lib/redis.js'
 import OpenAI from 'openai'
 import { capJsonValidator } from '../lib/validation.js'
+import { isVariantPurchasable } from '../lib/inventory.js'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -157,14 +158,22 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
     conditions.push(`
       EXISTS (
         SELECT 1 FROM jsonb_array_elements(pr.variants::jsonb) v
-        WHERE COALESCE((v->>'inventory_quantity')::int, 0) > 0
+        WHERE (
+          (v ? 'inventory_management' AND v->>'inventory_management' IS NULL) OR
+          UPPER(COALESCE(v->>'inventory_policy', 'DENY')) = 'CONTINUE' OR
+          COALESCE((v->>'inventory_quantity')::int, 0) > 0
+        )
       )`)
   }
   if (filters?.in_stock === false) {
     conditions.push(`
       NOT EXISTS (
         SELECT 1 FROM jsonb_array_elements(pr.variants::jsonb) v
-        WHERE COALESCE((v->>'inventory_quantity')::int, 0) > 0
+        WHERE (
+          (v ? 'inventory_management' AND v->>'inventory_management' IS NULL) OR
+          UPPER(COALESCE(v->>'inventory_policy', 'DENY')) = 'CONTINUE' OR
+          COALESCE((v->>'inventory_quantity')::int, 0) > 0
+        )
       )`)
   }
 
@@ -213,14 +222,20 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
     price_max: string | null
     currency: string
     geo_score: number
-    shipping_info: { free?: boolean; estimate?: string } | null
-    return_policy: { days?: number } | null
+    shipping_info: { free?: boolean; estimate?: string; url?: string } | null
+    return_policy: { days?: number; url?: string } | null
     merchant_id: string
     shopify_domain: string
     merchant_plan: string
     raw_title: string
     raw_images: Array<{ src: string; alt?: string }> | null
-    raw_variants: Array<{ price: string; inventory_quantity: number; title: string }> | null
+    raw_variants: Array<{
+      price: string
+      inventory_quantity: number
+      inventory_management?: string | null
+      inventory_policy?: string | null
+      title: string
+    }> | null
     similarity: number
     total_count: string
   }
@@ -268,10 +283,12 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
       specs: row.specs ?? {},
       certifications: row.certifications ?? [],
       availability: {
-        in_stock: Array.isArray(row.raw_variants) && row.raw_variants.some(v => v.inventory_quantity > 0),
+        in_stock: Array.isArray(row.raw_variants) && row.raw_variants.some((variant) => isVariantPurchasable(variant)),
         shipping_estimate: row.shipping_info?.estimate,
         free_shipping: row.shipping_info?.free ?? false,
         return_days: row.return_policy?.days,
+        shipping_policy_url: row.shipping_info?.url,
+        return_policy_url: row.return_policy?.url,
       },
       images,
       geo_score: row.geo_score,

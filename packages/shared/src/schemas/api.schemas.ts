@@ -71,6 +71,8 @@ export interface ProductResult {
     shipping_estimate?: string | undefined
     free_shipping?: boolean | undefined
     return_days?: number | undefined
+    shipping_policy_url?: string | undefined
+    return_policy_url?: string | undefined
   }
   images: string[]
   geo_score: number

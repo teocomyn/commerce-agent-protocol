@@ -20,8 +20,8 @@ compareRouter.post('/', capJsonValidator(CompareRequestSchema), async (c) => {
     comparison_tags: string[]
     specs: Record<string, string | number | boolean>
     geo_score: number
-    return_policy: { days?: number } | null
-    shipping_info: { estimate?: string; free?: boolean; days?: number } | null
+    return_policy: { days?: number; url?: string } | null
+    shipping_info: { estimate?: string; free?: boolean; days?: number; url?: string } | null
     raw_title: string
   }
 
@@ -66,9 +66,11 @@ compareRouter.post('/', capJsonValidator(CompareRequestSchema), async (c) => {
   if (criteria.includes('shipping')) {
     matrix['shipping_estimate'] = {}
     matrix['free_shipping'] = {}
+    matrix['shipping_policy_url'] = {}
     for (const p of products) {
       matrix['shipping_estimate']![p.id] = p.shipping_info?.estimate ?? 'unknown'
       matrix['free_shipping']![p.id] = p.shipping_info?.free ?? false
+      matrix['shipping_policy_url']![p.id] = p.shipping_info?.url ?? null
     }
   }
 
@@ -89,8 +91,10 @@ compareRouter.post('/', capJsonValidator(CompareRequestSchema), async (c) => {
 
   if (criteria.includes('return_policy')) {
     matrix['return_days'] = {}
+    matrix['return_policy_url'] = {}
     for (const p of products) {
       matrix['return_days']![p.id] = p.return_policy?.days ?? null
+      matrix['return_policy_url']![p.id] = p.return_policy?.url ?? null
     }
   }
 

@@ -3,6 +3,7 @@ import {
   CAP_WEBHOOK_TOPICS,
   createShopifyCart,
   exchangeCodeForToken,
+  fetchShopifyInventorySnapshot,
   fetchShopifyProducts,
   refreshOfflineAccessToken,
   registerShopifyWebhooks,
@@ -150,7 +151,15 @@ describe('Shopify HTTP and GraphQL contracts', () => {
   it('maps Admin GraphQL product, variant, inventory, and currency data', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
       data: {
-        shop: { currencyCode: 'EUR' },
+        shop: {
+          currencyCode: 'EUR',
+          shopPolicies: [{
+            type: 'REFUND_POLICY',
+            title: 'Refunds',
+            body: '30 day returns',
+            url: 'https://contract.myshopify.com/policies/refund-policy',
+          }],
+        },
         products: {
           nodes: [{
             id: 'gid://shopify/Product/100',
@@ -171,7 +180,10 @@ describe('Shopify HTTP and GraphQL contracts', () => {
               sku: 'CAP-42',
               inventoryQuantity: 3,
               inventoryPolicy: 'DENY',
-              inventoryItem: { legacyResourceId: '9001', tracked: true },
+              inventoryItem: {
+                legacyResourceId: '9001',
+                tracked: true,
+              },
               selectedOptions: [{ name: 'Size', value: '42' }],
             }] },
             media: { nodes: [] },
@@ -188,9 +200,65 @@ describe('Shopify HTTP and GraphQL contracts', () => {
       id: 100,
       currency: 'EUR',
       status: 'active',
-      variants: [{ id: 101, inventory_item_id: 9001, inventory_quantity: 3, price: '99.00' }],
+      variants: [{
+        id: 101,
+        inventory_item_id: 9001,
+        inventory_quantity: 3,
+        inventory_policy: 'DENY',
+        price: '99.00',
+        inventory_levels: [],
+      }],
+      shop_policies: [{ type: 'REFUND_POLICY', title: 'Refunds' }],
     })
     expect(page.nextPageInfo).toBeUndefined()
+  })
+
+  it('maps an authoritative multi-location inventory snapshot', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      data: {
+        inventoryItem: {
+          legacyResourceId: '9001',
+          tracked: true,
+          variants: { nodes: [{
+            legacyResourceId: '101',
+            inventoryQuantity: 6,
+            inventoryPolicy: 'DENY',
+          }] },
+          inventoryLevels: {
+            nodes: [
+              {
+                location: { legacyResourceId: '501', name: 'Paris', isActive: true },
+                quantities: [{ name: 'available', quantity: 2 }],
+              },
+              {
+                location: { legacyResourceId: '502', name: 'Lyon', isActive: true },
+                quantities: [{ name: 'available', quantity: 4 }],
+              },
+              {
+                location: { legacyResourceId: '503', name: 'Closed', isActive: false },
+                quantities: [{ name: 'available', quantity: 99 }],
+              },
+            ],
+          },
+        },
+      },
+    })))
+
+    await expect(fetchShopifyInventorySnapshot(
+      'contract.myshopify.com',
+      'shpat_access',
+      '9001',
+    )).resolves.toEqual({
+      inventory_item_id: 9001,
+      variant_id: 101,
+      inventory_quantity: 6,
+      inventory_management: 'shopify',
+      inventory_policy: 'DENY',
+      inventory_levels: [
+        { location_id: 501, location_name: 'Paris', available: 2 },
+        { location_id: 502, location_name: 'Lyon', available: 4 },
+      ],
+    })
   })
 
   it('transmits checkout tracking and buyer country through Storefront cartCreate', async () => {

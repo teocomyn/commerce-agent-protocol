@@ -196,6 +196,39 @@ describe.sequential('CAP integration boundaries', () => {
     expect(body.results.map((product) => product.id)).toContain(productA)
   })
 
+  it('treats continue-selling variants as purchasable at zero stock', async () => {
+    await prisma.productRaw.updateMany({
+      where: { merchantId: merchantA },
+      data: {
+        variants: [{
+          id: 101,
+          inventory_item_id: 9001,
+          inventory_quantity: 0,
+          inventory_management: 'shopify',
+          inventory_policy: 'CONTINUE',
+          price: '29.00',
+          title: 'Default',
+        }],
+      },
+    })
+    const app = new Hono()
+    app.use('/v1/*', authMiddleware)
+    app.route('/v1/search', searchRouter)
+    const response = await app.request('/v1/search', {
+      method: 'POST',
+      headers: { 'X-CAP-Key': validKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: 'shoe', filters: { in_stock: true } }),
+    })
+    expect(response.status).toBe(200)
+    const body = await response.json() as {
+      results: Array<{ id: string; availability: { in_stock: boolean } }>
+    }
+    expect(body.results).toContainEqual(expect.objectContaining({
+      id: productA,
+      availability: expect.objectContaining({ in_stock: true }),
+    }))
+  })
+
   it('completes the Shopify OAuth lifecycle and blocks callback replay', async () => {
     process.env.SHOPIFY_API_KEY = 'integration-client-id'
     process.env.SHOPIFY_SCOPES = 'read_products,read_inventory,read_orders'
@@ -371,7 +404,25 @@ describe.sequential('CAP integration boundaries', () => {
   })
 
   it('processes an inventory webhook once and persists stock', async () => {
-    const payload = JSON.stringify({ inventory_item_id: 9001, available: 0 })
+    await prisma.productRaw.updateMany({
+      where: { merchantId: merchantA },
+      data: {
+        variants: [{
+          id: 101,
+          inventory_item_id: 9001,
+          inventory_quantity: 4,
+          inventory_management: 'shopify',
+          inventory_policy: 'DENY',
+          inventory_levels: [
+            { location_id: 10, location_name: 'Paris', available: 2 },
+            { location_id: 20, location_name: 'Lyon', available: 2 },
+          ],
+          price: '29.00',
+          title: 'Default',
+        }],
+      },
+    })
+    const payload = JSON.stringify({ inventory_item_id: 9001, location_id: 10, available: 0 })
     const hmac = crypto.createHmac('sha256', 'integration-shopify-secret').update(payload).digest('base64')
     const request = () => webhookRouter.request('/shopify', {
       method: 'POST',
@@ -387,7 +438,7 @@ describe.sequential('CAP integration boundaries', () => {
     expect((await request()).status).toBe(200)
     expect(await (await request()).json()).toMatchObject({ duplicate: true })
     const raw = await prisma.productRaw.findFirstOrThrow({ where: { merchantId: merchantA } })
-    expect((raw.variants as Array<{ inventory_quantity: number }>)[0]?.inventory_quantity).toBe(0)
+    expect((raw.variants as Array<{ inventory_quantity: number }>)[0]?.inventory_quantity).toBe(2)
   })
 
   it('creates checkout state with deterministic Shopify tracking', async () => {

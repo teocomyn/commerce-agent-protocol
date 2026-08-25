@@ -64,11 +64,21 @@ export interface EnrichmentJobData {
   action: 'create' | 'update' | 'full-sync'
 }
 
-export interface CatalogSyncJobData {
+export interface FullCatalogSyncJobData {
   merchantId: string
   shopDomain: string
+  kind?: 'full-catalog'
   cursor?: string // Pagination cursor for resume
 }
+
+export interface InventorySyncJobData {
+  merchantId: string
+  shopDomain: string
+  kind: 'inventory'
+  inventoryItemId: string
+}
+
+export type CatalogSyncJobData = FullCatalogSyncJobData | InventorySyncJobData
 
 // ============================================================
 // QUEUE MONITORING HELPERS

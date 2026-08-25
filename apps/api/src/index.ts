@@ -141,6 +141,8 @@ app.get('/openapi.json', async (c) => {
                 shipping_estimate: { type: 'string' },
                 free_shipping: { type: 'boolean' },
                 return_days: { type: 'integer' },
+                shipping_policy_url: { type: 'string', format: 'uri' },
+                return_policy_url: { type: 'string', format: 'uri' },
               },
             },
             images: { type: 'array', items: { type: 'string' } },

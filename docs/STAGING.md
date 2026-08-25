@@ -25,6 +25,8 @@ Provide these values only on the `cap-staging-api` service during the initial Bl
 - `ENCRYPTION_KEY`
 - `CAP_OPERATIONS_TOKEN` (random, at least 32 characters, staging-only)
 
+Set `SHOPIFY_SCOPES` to the value documented in `.env.example`. The catalog query now requires `read_locations`, `read_legal_policies`, and `read_markets_home` in addition to product and inventory access. Re-authorize the development store after changing scopes.
+
 The workers reference the OpenAI, Shopify, and encryption values from `cap-staging-api`, which guarantees that token encryption and Shopify credentials remain identical across all three processes. The operations token remains API-only, and the dashboard session secret is generated independently by Render.
 
 Use a dedicated Shopify development app for staging. Configure:

@@ -122,6 +122,7 @@ async function step1_normalize(product: {
   images: Array<{ src: string; alt: string | null }>
   currency: string
   metafields: Array<{ key: string; type: string; value: string }>
+  shop_policies: Array<{ type: string; title: string; body: string; url: string }>
 }) {
   const description = stripHtml(product.body_html ?? '')
   const tags = product.tags.split(',').map(t => t.trim()).filter(Boolean)
@@ -139,7 +140,7 @@ async function step1_normalize(product: {
     totalStock,
     images: product.images,
     currency: product.currency,
-    ...extractCommercePolicies(product.metafields),
+    ...extractCommercePolicies(product.metafields, product.shop_policies),
   }
 }
 

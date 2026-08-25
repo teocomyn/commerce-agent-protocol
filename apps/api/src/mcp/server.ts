@@ -13,6 +13,7 @@ import {
   decryptToken,
   ShopifyCartError,
 } from '../lib/shopify.js'
+import { isVariantPurchasable } from '../lib/inventory.js'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 10_000, maxRetries: 2 })
 
@@ -169,14 +170,22 @@ async function handleCommerceSearch(args: Record<string, unknown>) {
     conditions.push(`
       EXISTS (
         SELECT 1 FROM jsonb_array_elements(pr.variants::jsonb) v
-        WHERE COALESCE((v->>'inventory_quantity')::int, 0) > 0
+        WHERE (
+          (v ? 'inventory_management' AND v->>'inventory_management' IS NULL) OR
+          UPPER(COALESCE(v->>'inventory_policy', 'DENY')) = 'CONTINUE' OR
+          COALESCE((v->>'inventory_quantity')::int, 0) > 0
+        )
       )`)
   }
   if (in_stock === false) {
     conditions.push(`
       NOT EXISTS (
         SELECT 1 FROM jsonb_array_elements(pr.variants::jsonb) v
-        WHERE COALESCE((v->>'inventory_quantity')::int, 0) > 0
+        WHERE (
+          (v ? 'inventory_management' AND v->>'inventory_management' IS NULL) OR
+          UPPER(COALESCE(v->>'inventory_policy', 'DENY')) = 'CONTINUE' OR
+          COALESCE((v->>'inventory_quantity')::int, 0) > 0
+        )
       )`)
   }
 
@@ -210,7 +219,11 @@ async function handleCommerceSearch(args: Record<string, unknown>) {
             (EXISTS (SELECT 1 FROM products_raw pr2
                      JOIN jsonb_array_elements(pr2.variants::jsonb) v ON TRUE
                      WHERE pr2.id = pe.product_raw_id
-                     AND (v->>'inventory_quantity')::int > 0)) as availability_in_stock
+                     AND (
+                       (v ? 'inventory_management' AND v->>'inventory_management' IS NULL) OR
+                       UPPER(COALESCE(v->>'inventory_policy', 'DENY')) = 'CONTINUE' OR
+                       COALESCE((v->>'inventory_quantity')::int, 0) > 0
+                     ))) as availability_in_stock
      FROM products_enriched pe
      JOIN products_raw pr ON pr.id = pe.product_raw_id
      JOIN merchants m ON m.id = pe.merchant_id
@@ -254,8 +267,8 @@ async function handleCommerceCompare(args: Record<string, unknown>) {
     certifications: string[]
     specs: Record<string, unknown>
     geo_score: number
-    return_policy: { days?: number } | null
-    shipping_info: { estimate?: string; free?: boolean } | null
+    return_policy: { days?: number; url?: string } | null
+    shipping_info: { estimate?: string; free?: boolean; url?: string } | null
     raw_title: string
   }
 
@@ -295,6 +308,9 @@ async function handleCommerceCompare(args: Record<string, unknown>) {
     matrix['free_shipping'] = Object.fromEntries(
       products.map((p) => [p.id, p.shipping_info?.free ?? false]),
     )
+    matrix['shipping_policy_url'] = Object.fromEntries(
+      products.map((p) => [p.id, p.shipping_info?.url ?? null]),
+    )
   }
   if (criteria.includes('specs')) {
     const allKeys = new Set<string>()
@@ -308,6 +324,9 @@ async function handleCommerceCompare(args: Record<string, unknown>) {
   if (criteria.includes('return_policy')) {
     matrix['return_days'] = Object.fromEntries(
       products.map((p) => [p.id, p.return_policy?.days ?? null]),
+    )
+    matrix['return_policy_url'] = Object.fromEntries(
+      products.map((p) => [p.id, p.return_policy?.url ?? null]),
     )
   }
 
@@ -371,6 +390,8 @@ async function handleCommerceCheckout(args: Record<string, unknown>) {
   type ShopifyVariantLite = {
     id: number
     inventory_quantity?: number
+    inventory_management?: string | null
+    inventory_policy?: string | null
   }
   const variants = Array.isArray(product.productRaw.variants)
     ? (product.productRaw.variants as unknown as ShopifyVariantLite[])
@@ -378,10 +399,10 @@ async function handleCommerceCheckout(args: Record<string, unknown>) {
 
   const chosen = variantId
     ? variants.find((v) => String(v.id) === variantId)
-    : variants.find((v) => (v.inventory_quantity ?? 0) >= quantity) ?? variants[0]
+    : variants.find((variant) => isVariantPurchasable(variant, quantity)) ?? variants[0]
 
   if (!chosen) throw new Error(`Variant not found for product ${productId}`)
-  if ((chosen.inventory_quantity ?? 0) < quantity) {
+  if (!isVariantPurchasable(chosen, quantity)) {
     throw new Error(
       `Variant ${chosen.id} has only ${chosen.inventory_quantity ?? 0} units in stock`,
     )

@@ -29,6 +29,29 @@ describe('commerce metadata normalization', () => {
     expect(extractCommercePolicies([])).toEqual({ shippingInfo: null, returnPolicy: null })
   })
 
+  it('falls back to the official Shopify shipping and refund policies', () => {
+    expect(extractCommercePolicies([], [
+      { type: 'SHIPPING_POLICY', title: 'Shipping', body: 'Ships in Europe.', url: 'https://store/policies/shipping' },
+      { type: 'REFUND_POLICY', title: 'Refunds', body: 'Returns accepted.', url: 'https://store/policies/refund' },
+    ])).toEqual({
+      shippingInfo: {
+        type: 'SHIPPING_POLICY', title: 'Shipping', body: 'Ships in Europe.',
+        url: 'https://store/policies/shipping', source: 'shopify_policy',
+      },
+      returnPolicy: {
+        type: 'REFUND_POLICY', title: 'Refunds', body: 'Returns accepted.',
+        url: 'https://store/policies/refund', source: 'shopify_policy',
+      },
+    })
+  })
+
+  it('prefers explicit CAP metafields over shop-wide policy documents', () => {
+    expect(extractCommercePolicies(
+      [{ key: 'return_days', value: '30' }],
+      [{ type: 'REFUND_POLICY', title: 'Refunds', body: 'Policy', url: 'https://store/refund' }],
+    ).returnPolicy).toEqual({ days: 30 })
+  })
+
   it('ignores invalid JSON policy objects', () => {
     expect(extractCommercePolicies([{ key: 'shipping_info', value: 'invalid' }]).shippingInfo).toBeNull()
   })
