@@ -12,7 +12,7 @@ The root `render.yaml` provisions the four processes in Frankfurt, plus a privat
 
 The root domain currently serves a different product titled “CLI Agent Protocol”. Confirm that this site can be replaced before moving the root DNS record; the API and dashboard subdomains can be added independently without that cutover.
 
-Before the first Blueprint sync, provide the five secrets marked `sync: false`: `OPENAI_API_KEY`, `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_SCOPES`, and `ENCRYPTION_KEY`. Do not copy a development encryption key after production tokens have already been encrypted: rotation requires re-encrypting stored tokens.
+Before the first Blueprint sync, provide the six secrets marked `sync: false`: `OPENAI_API_KEY`, `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_SCOPES`, `ENCRYPTION_KEY`, and `CAP_OPERATIONS_TOKEN`. The operations token must be random, at least 32 characters, and distinct from merchant API keys and staging. Do not copy a development encryption key after production tokens have already been encrypted: rotation requires re-encrypting stored tokens.
 
 The API pre-deploy hook runs `prisma migrate deploy`; the initial migration enables `vector`. Render Postgres 16 supports pgvector. Deploys are gated on successful GitHub checks.
 
@@ -48,4 +48,4 @@ docker build -f Dockerfile.api -t cap-api:release .
 docker build -f Dockerfile.dashboard -t cap-dashboard:release .
 ```
 
-After deployment, validate `/health`, perform a Shopify OAuth install, create and revoke an API key, deliver the same webhook twice, and complete a test checkout. Failed jobs are retained in the `dead-letter` BullMQ queue for inspection and replay.
+After deployment, validate `/health` and `/ready`, perform a Shopify OAuth install, create and revoke an API key, deliver the same webhook twice, and complete a test checkout. Failed jobs are retained in the `dead-letter` BullMQ queue for inspection and controlled replay. See the [operations runbook](./OPERATIONS.md).

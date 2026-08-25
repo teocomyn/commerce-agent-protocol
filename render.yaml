@@ -22,7 +22,7 @@ services:
     dockerfilePath: ./Dockerfile.api
     dockerContext: .
     autoDeployTrigger: checksPass
-    healthCheckPath: /health
+    healthCheckPath: /ready
     domains:
       - api.cap-protocol.org
     preDeployCommand: pnpm db:migrate
@@ -57,6 +57,8 @@ services:
       - key: SHOPIFY_SCOPES
         sync: false
       - key: ENCRYPTION_KEY
+        sync: false
+      - key: CAP_OPERATIONS_TOKEN
         sync: false
 
   - type: worker

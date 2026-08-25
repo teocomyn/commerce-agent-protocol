@@ -21,6 +21,15 @@ node -e '
   if (body.status !== "ok") throw new Error(`Unexpected health status: ${body.status}`);
 ' "$tmp_dir/health.json"
 
+echo "Checking API readiness: $api_url/ready"
+curl "${curl_common[@]}" "$api_url/ready" > "$tmp_dir/ready.json"
+node -e '
+  const body = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  if (body.status !== "ready" || body.checks?.postgres !== "ok" || body.checks?.redis !== "ok") {
+    throw new Error("API dependencies are not ready");
+  }
+' "$tmp_dir/ready.json"
+
 echo "Checking OpenAPI document"
 curl "${curl_common[@]}" "$api_url/openapi.json" > "$tmp_dir/openapi.json"
 node -e '

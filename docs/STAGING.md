@@ -23,8 +23,9 @@ Provide these values only on the `cap-staging-api` service during the initial Bl
 - `SHOPIFY_API_SECRET`
 - `SHOPIFY_SCOPES`
 - `ENCRYPTION_KEY`
+- `CAP_OPERATIONS_TOKEN` (random, at least 32 characters, staging-only)
 
-The workers reference these values from `cap-staging-api`, which guarantees that token encryption and Shopify credentials remain identical across all three processes. The dashboard session secret is generated independently by Render.
+The workers reference the OpenAI, Shopify, and encryption values from `cap-staging-api`, which guarantees that token encryption and Shopify credentials remain identical across all three processes. The operations token remains API-only, and the dashboard session secret is generated independently by Render.
 
 Use a dedicated Shopify development app for staging. Configure:
 

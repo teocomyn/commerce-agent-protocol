@@ -12,6 +12,7 @@ import { CAP_WEBHOOK_TOPICS, decryptToken, encryptToken } from '../lib/shopify.j
 import { redis } from '../lib/redis.js'
 import { catalogSyncQueue, deadLetterQueue, enrichmentQueue } from '../lib/queue.js'
 import { getValidShopifyAdminToken } from '../lib/shopify-token.js'
+import { checkReadiness, operationsRouter } from '../routes/operations.js'
 
 const createShopifyCartMock = vi.hoisted(() => vi.fn(async (_shop: string, _token: string, input: { trackingToken: string }) => ({
   cartId: 'gid://shopify/Cart/test-cart',
@@ -444,5 +445,76 @@ describe.sequential('CAP integration boundaries', () => {
     expect(merchant.shopifyToken).toBeNull()
     expect(merchant.storefrontToken).toBeNull()
     expect(merchant.uninstalledAt).toBeInstanceOf(Date)
+  })
+
+  it('reports dependency readiness and protects operational metrics', async () => {
+    process.env.CAP_OPERATIONS_TOKEN = 'integration-operations-secret-at-least-32-chars'
+    try {
+      await expect(checkReadiness()).resolves.toMatchObject({
+        ready: true,
+        checks: { postgres: 'ok', redis: 'ok' },
+      })
+      expect((await operationsRouter.request('/queues')).status).toBe(401)
+      const metrics = await operationsRouter.request('/metrics', {
+        headers: { Authorization: `Bearer ${process.env.CAP_OPERATIONS_TOKEN}` },
+      })
+      expect(metrics.status).toBe(200)
+      expect(metrics.headers.get('content-type')).toContain('text/plain')
+      const body = await metrics.text()
+      expect(body).toContain('cap_merchants_active')
+      expect(body).toContain('cap_queue_jobs{queue="enrichment"')
+      expect(body).toContain('cap_webhook_events_total')
+    } finally {
+      delete process.env.CAP_OPERATIONS_TOKEN
+    }
+  })
+
+  it('requires confirmation and replays a dead-letter job once', async () => {
+    process.env.CAP_OPERATIONS_TOKEN = 'integration-operations-secret-at-least-32-chars'
+    const deadLetter = await deadLetterQueue.add(`integration-dlq-${suffix}`, {
+      sourceQueue: 'enrichment',
+      sourceJobId: `source-${suffix}`,
+      data: {
+        shopDomain: domains[0],
+        shopifyProductId: '123',
+        merchantId: merchantA,
+        action: 'update',
+      },
+      attemptsMade: 3,
+      failedReason: 'Integration failure',
+      failedAt: new Date().toISOString(),
+    })
+    let replayJobId: string | undefined
+    const headers = {
+      Authorization: `Bearer ${process.env.CAP_OPERATIONS_TOKEN}`,
+      'Content-Type': 'application/json',
+    }
+    try {
+      const withoutConfirmation = await operationsRouter.request(
+        `/dead-letter/${deadLetter.id}/replay`,
+        { method: 'POST', headers, body: '{}' },
+      )
+      expect(withoutConfirmation.status).toBe(400)
+
+      const replay = await operationsRouter.request(
+        `/dead-letter/${deadLetter.id}/replay`,
+        { method: 'POST', headers, body: JSON.stringify({ confirm: true }) },
+      )
+      expect(replay.status).toBe(200)
+      const replayBody = await replay.json() as { replay_job_id: string }
+      replayJobId = replayBody.replay_job_id
+      expect(await deadLetterQueue.getJob(deadLetter.id!)).toBeUndefined()
+      expect(await enrichmentQueue.getJob(replayJobId)).toBeDefined()
+
+      const secondReplay = await operationsRouter.request(
+        `/dead-letter/${deadLetter.id}/replay`,
+        { method: 'POST', headers, body: JSON.stringify({ confirm: true }) },
+      )
+      expect(secondReplay.status).toBe(404)
+    } finally {
+      if (replayJobId) await (await enrichmentQueue.getJob(replayJobId))?.remove()
+      await (await deadLetterQueue.getJob(deadLetter.id!))?.remove()
+      delete process.env.CAP_OPERATIONS_TOKEN
+    }
   })
 })

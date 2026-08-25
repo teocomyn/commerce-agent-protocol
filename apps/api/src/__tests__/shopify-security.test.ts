@@ -55,7 +55,9 @@ describe('Shopify security helpers', () => {
 
   it('rejects tampered ciphertext', () => {
     const encrypted = encryptToken('secret')
-    expect(() => decryptToken(`${encrypted.slice(0, -1)}0`)).toThrow()
+    const [iv, tag, ciphertext] = encrypted.split(':')
+    const tamperedTag = `${tag?.startsWith('0') ? '1' : '0'}${tag?.slice(1)}`
+    expect(() => decryptToken(`${iv}:${tamperedTag}:${ciphertext}`)).toThrow()
   })
 
   it('rejects an undersized encryption key', () => {

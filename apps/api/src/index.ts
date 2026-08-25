@@ -9,6 +9,7 @@ import { compareRouter } from './routes/compare.js'
 import { checkoutRouter } from './routes/checkout.js'
 import { webhookRouter } from './routes/webhooks.js'
 import { oauthRouter } from './routes/shopify/oauth.js'
+import { checkReadiness, operationsRouter } from './routes/operations.js'
 import { authMiddleware } from './middleware/auth.js'
 import type { CAPError } from '@cap/shared'
 
@@ -37,6 +38,20 @@ app.get('/health', (c) => c.json({
   version: '0.1.0',
   timestamp: new Date().toISOString(),
 }))
+
+// Readiness verifies required dependencies without exposing credentials.
+app.get('/ready', async (c) => {
+  const readiness = await checkReadiness()
+  return c.json({
+    status: readiness.ready ? 'ready' : 'not_ready',
+    checks: readiness.checks,
+    latency_ms: readiness.latencyMs,
+    timestamp: new Date().toISOString(),
+  }, readiness.ready ? 200 : 503)
+})
+
+// Operational surfaces use a dedicated token, never a merchant API key.
+app.route('/internal/operations', operationsRouter)
 
 // Shopify OAuth (no auth required)
 app.route('/shopify', oauthRouter)
