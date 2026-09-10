@@ -27,7 +27,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@prisma/client": "^5.22.0",
     "bullmq": "^5.76.4",
-    "hono": "^4.13.1",
+    "hono": "^4.13.5",
     "ioredis": "^5.4.0",
     "openai": "^4.57.0",
     "zod": "^3.23.0"
