@@ -60,12 +60,13 @@ export function assertRuntimeSecrets(
     errors.push('ENCRYPTION_KEY is not set. Generate one with `openssl rand -hex 32`.')
   } else if (isPlaceholderSecret(encryptionKey)) {
     errors.push('ENCRYPTION_KEY still contains the example value. Generate one with `openssl rand -hex 32`.')
+  } else if (!decodeCanonicalKey(encryptionKey) && Buffer.byteLength(encryptionKey, 'utf8') < 32) {
+    errors.push('ENCRYPTION_KEY must contain at least 32 bytes. Generate one with `openssl rand -hex 32`.')
+  } else if (isTriviallyGuessable(encryptionKey)) {
+    // Applies to every format: '1'.repeat(64) is valid hex but not a secret.
+    errors.push('ENCRYPTION_KEY is trivially guessable. Generate one with `openssl rand -hex 32`.')
   } else if (!decodeCanonicalKey(encryptionKey)) {
-    if (Buffer.byteLength(encryptionKey, 'utf8') < 32) {
-      errors.push('ENCRYPTION_KEY must contain at least 32 bytes. Generate one with `openssl rand -hex 32`.')
-    } else if (isTriviallyGuessable(encryptionKey)) {
-      errors.push('ENCRYPTION_KEY is trivially guessable. Generate one with `openssl rand -hex 32`.')
-    } else if (production) {
+    if (production) {
       errors.push(
         'ENCRYPTION_KEY must be 64 hex characters or base64 of 32 bytes in production. ' +
         'Move the current value to ENCRYPTION_KEY_PREVIOUS so existing tokens stay readable.',
@@ -81,6 +82,7 @@ export function assertRuntimeSecrets(
   const previousKey = env['ENCRYPTION_KEY_PREVIOUS']
   if (previousKey && (
     isPlaceholderSecret(previousKey) ||
+    isTriviallyGuessable(previousKey) ||
     (!decodeCanonicalKey(previousKey) && Buffer.byteLength(previousKey, 'utf8') < 32)
   )) {
     errors.push('ENCRYPTION_KEY_PREVIOUS must be the previous 32-byte key (not an example or shorter value).')

@@ -128,10 +128,15 @@ operationsRouter.post('/catalog-sync', async (c) => {
     select: { id: true, shopifyDomain: true },
   })
   const requestedAt = Date.now()
+  // Deduplicated per merchant while a resync is still waiting or running, so
+  // a double submission does not run two overlapping full syncs.
   await catalogSyncQueue.addBulk(merchants.map((merchant) => ({
     name: 'full-catalog-sync',
     data: { merchantId: merchant.id, shopDomain: merchant.shopifyDomain },
-    opts: { jobId: `operations-resync-${merchant.id}-${requestedAt}` },
+    opts: {
+      jobId: `operations-resync-${merchant.id}-${requestedAt}`,
+      deduplication: { id: `operations-resync-${merchant.id}` },
+    },
   })))
   return c.json({ queued: merchants.length })
 })

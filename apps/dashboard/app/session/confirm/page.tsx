@@ -26,7 +26,7 @@ export default async function ConfirmOwnerSessionPage() {
               <strong style={{ color: 'var(--text-primary)' }}>{loginToken.merchant.shopifyDomain}</strong>?
               Only continue if you just connected this store from Shopify.
             </p>
-            <ConfirmOwnerSessionForm />
+            <ConfirmOwnerSessionForm merchantId={loginToken.merchantId} />
           </>
         ) : (
           <>

@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import { cookies } from 'next/headers'
 import { prisma, type MerchantRole } from '@cap/db'
 import { dashboardSessionSecret } from './session-secret'
+import { configuredDashboardOrigin } from './public-origin'
 
 export const DASHBOARD_SESSION_COOKIE = 'cap_dashboard_session'
 const SESSION_TTL_SECONDS = 8 * 60 * 60
@@ -101,28 +102,36 @@ function firstHeaderValue(request: Request, name: string): string | undefined {
   return request.headers.get(name)?.split(',')[0]?.trim() || undefined
 }
 
+function requestDerivedOrigin(request: Request): string {
+  const url = new URL(request.url)
+  const scheme = firstHeaderValue(request, 'x-forwarded-proto') ?? url.protocol.replace(':', '')
+  const host = firstHeaderValue(request, 'x-forwarded-host') ?? request.headers.get('host') ?? url.host
+  return `${scheme}://${host}`
+}
+
 /**
- * Origins allowed to send cookie-authenticated mutations. Behind Render's
- * proxy, request.url carries the internal scheme (http), so the public origin
- * comes from DASHBOARD_URL, or else from the forwarded scheme and host.
+ * Public origin for redirects. Behind Render's proxy request.url carries the
+ * internal http scheme, which would make browsers drop Secure cookies. In
+ * production it comes only from DASHBOARD_URL (validated at boot); request
+ * headers, which clients control, are trusted only outside production.
+ */
+export function dashboardPublicOrigin(request: Request): string {
+  const configured = configuredDashboardOrigin()
+  if (configured) return configured
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('DASHBOARD_URL must be set in production')
+  }
+  return requestDerivedOrigin(request)
+}
+
+/**
+ * Origins allowed to send cookie-authenticated mutations. Production fails
+ * closed: without a valid DASHBOARD_URL no origin is accepted.
  */
 function expectedOrigins(request: Request): string[] {
-  const origins: string[] = []
-  const configured = process.env.DASHBOARD_URL
-  if (configured) {
-    try {
-      origins.push(new URL(configured).origin)
-    } catch {
-      // Ignored: an invalid DASHBOARD_URL falls back to the request origin.
-    }
-  }
-  if (origins.length === 0 || process.env.NODE_ENV !== 'production') {
-    const url = new URL(request.url)
-    const scheme = firstHeaderValue(request, 'x-forwarded-proto') ?? url.protocol.replace(':', '')
-    const host = firstHeaderValue(request, 'x-forwarded-host') ?? request.headers.get('host') ?? url.host
-    origins.push(`${scheme}://${host}`)
-  }
-  return origins
+  const configured = configuredDashboardOrigin()
+  if (process.env.NODE_ENV === 'production') return configured ? [configured] : []
+  return configured ? [configured, requestDerivedOrigin(request)] : [requestDerivedOrigin(request)]
 }
 
 /** Compares the full origin (scheme, host and port), not only the host. */

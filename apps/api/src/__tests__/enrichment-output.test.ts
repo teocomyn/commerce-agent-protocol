@@ -63,6 +63,25 @@ describe('LLM enrichment output', () => {
     expect(normalized.target_audience).toEqual(['adults'])
   })
 
+  it('drops claim sentences from care info and the summary', () => {
+    const output = LlmEnrichmentSchema.parse({
+      category: 'Apparel > Tops',
+      subcategory: 'T-shirts',
+      specs: [],
+      use_cases: [],
+      target_audience: [],
+      care_info: 'Machine wash cold. Made with GOTS certified cotton.',
+      size_guide: null,
+      summary: 'A relaxed cotton T-shirt. Eco-friendly and carbon neutral!',
+    })
+    const normalized = normalizeLlmEnrichment(output)
+    expect(normalized.care_info).toBe('Machine wash cold.')
+    expect(normalized.summary).toBe('A relaxed cotton T-shirt.')
+
+    const claimOnly = normalizeLlmEnrichment({ ...output, care_info: 'Certified organic.' })
+    expect(claimOnly.care_info).toBeUndefined()
+  })
+
   it('normalizes array-shaped specs and size guides', () => {
     const output = LlmEnrichmentSchema.parse({
       category: 'Footwear > Sneakers',

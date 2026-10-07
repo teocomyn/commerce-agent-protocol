@@ -58,8 +58,21 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
       totalPages++
       await job.log(`Fetched page ${totalPages}: ${products.length} products`)
 
-      // Enqueue each product for enrichment
-      const enrichmentJobs = products.map((product) => ({
+      // Every status is read so a product that became a draft or was archived
+      // while its webhook was missed gets hidden. Inactive products only need
+      // their stored status updated: no enrichment fetch, no inventory jobs.
+      const activeProducts = products.filter((product) => product.status === 'active')
+      const inactiveProducts = products.filter((product) => product.status !== 'active')
+      if (inactiveProducts.length > 0) {
+        await prisma.$transaction(inactiveProducts.map((product) => prisma.productRaw.updateMany({
+          where: { merchantId, shopifyId: BigInt(product.id), status: { not: product.status } },
+          data: { status: product.status, syncedAt: new Date() },
+        })))
+        await invalidateMerchantSearchCache(merchantId)
+      }
+
+      // Enqueue each active product for enrichment
+      const enrichmentJobs = activeProducts.map((product) => ({
         name: 'enrich-product',
         data: {
           shopDomain,
@@ -76,7 +89,7 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
 
       await enrichmentQueue.addBulk(enrichmentJobs)
 
-      const inventoryItemIds = new Set(products.flatMap((product) => product.variants.flatMap(
+      const inventoryItemIds = new Set(activeProducts.flatMap((product) => product.variants.flatMap(
         (variant) => variant.inventory_item_id == null ? [] : [String(variant.inventory_item_id)],
       )))
       await catalogSyncQueue.addBulk([...inventoryItemIds].map((inventoryItemId) => ({

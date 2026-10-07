@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { assertRuntimeSecrets, decodeCanonicalKey, isPlaceholderSecret } from '../lib/secrets.js'
 
-const HEX_KEY = 'ab'.repeat(32)
+const HEX_KEY = '0f1e2d3c4b5a69788796a5b4c3d2e1f0'.repeat(2)
 
 describe('runtime secret validation', () => {
   it('detects the example values shipped in .env.example', () => {
@@ -64,6 +64,14 @@ describe('runtime secret validation', () => {
       .toThrow(/trivially guessable/)
     expect(() => assertRuntimeSecrets({ ENCRYPTION_KEY: HEX_KEY, CAP_OPERATIONS_TOKEN: 'a'.repeat(40) }))
       .toThrow(/CAP_OPERATIONS_TOKEN/)
+  })
+
+  it('rejects guessable keys even in the canonical hex or base64 format', () => {
+    expect(decodeCanonicalKey('1'.repeat(64))?.length).toBe(32)
+    expect(() => assertRuntimeSecrets({ ENCRYPTION_KEY: '1'.repeat(64) })).toThrow(/trivially guessable/)
+    expect(() => assertRuntimeSecrets({ ENCRYPTION_KEY: 'ab'.repeat(32) })).toThrow(/trivially guessable/)
+    expect(() => assertRuntimeSecrets({ ENCRYPTION_KEY: HEX_KEY, ENCRYPTION_KEY_PREVIOUS: 'c3'.repeat(32) }))
+      .toThrow(/ENCRYPTION_KEY_PREVIOUS/)
   })
 
   it('rejects a blank Shopify secret in production but not in MCP mode', () => {

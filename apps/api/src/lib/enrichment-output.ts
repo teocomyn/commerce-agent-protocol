@@ -69,6 +69,11 @@ export function isClaimLike(value: string | number | boolean): boolean {
   return typeof value === 'string' && CLAIM_PATTERN.test(value)
 }
 
+// Free text keeps its other sentences: only the ones carrying a claim go.
+function withoutClaimSentences(text: string): string {
+  return text.split(/(?<=[.!?;])\s+/).filter((sentence) => !isClaimLike(sentence)).join(' ').trim()
+}
+
 // Object.fromEntries keeps the last duplicate; the first occurrence wins here
 // so a repeated name cannot silently replace an earlier, usually better, value.
 function firstEntries<V>(entries: Array<readonly [string, V]>): Record<string, V> {
@@ -83,6 +88,7 @@ export function normalizeLlmEnrichment(output: z.infer<typeof LlmEnrichmentSchem
   const specs = firstEntries(output.specs
     .filter((spec) => !isClaimLike(spec.name) && !isClaimLike(spec.value))
     .map((spec) => [spec.name.trim(), spec.value] as const))
+  const careInfo = output.care_info ? withoutClaimSentences(output.care_info) : ''
   const sizeGuide = output.size_guide && output.size_guide.length > 0
     ? firstEntries(output.size_guide.map((row) => [row.size.trim(), row.measurements] as const))
     : undefined
@@ -92,8 +98,10 @@ export function normalizeLlmEnrichment(output: z.infer<typeof LlmEnrichmentSchem
     specs,
     use_cases: output.use_cases.filter((useCase) => !isClaimLike(useCase)),
     target_audience: output.target_audience.filter((audience) => !isClaimLike(audience)),
-    ...(output.care_info && { care_info: output.care_info }),
+    ...(careInfo && { care_info: careInfo }),
     ...(sizeGuide && { size_guide: sizeGuide }),
-    summary: output.summary,
+    // The summary feeds the embedding: a claim in it would still let agents
+    // match products on certifications the merchant never declared.
+    summary: withoutClaimSentences(output.summary),
   })
 }

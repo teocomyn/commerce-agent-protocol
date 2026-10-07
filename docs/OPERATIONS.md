@@ -35,9 +35,9 @@ The `catalog-sync` queue contains both full catalog pulls and authoritative inve
 
 ## Full catalog resync
 
-`POST /internal/operations/catalog-sync` with `{"confirm":true}` queues a full catalog sync for every active install and returns the number of queued shops. Use it after a release that changes stored product data. It calls Shopify for every product and OpenAI for every product whose content changed, so run it once, not on a schedule.
+`POST /internal/operations/catalog-sync` with `{"confirm":true}` queues a full catalog sync for every active install and returns the number of queued shops. Use it after a release that changes stored product data. It calls Shopify for every product and OpenAI for every active product on each run, so run it once, not on a schedule. A second request while a shop's resync is still waiting or running is ignored for that shop.
 
-A full sync now reads every product, active or not, so a product that became a draft or was archived while its webhook was missed is hidden on the next sync.
+A full sync reads every product, active or not, so a product that became a draft or was archived while its webhook was missed is hidden on the next sync. Inactive products only have their stored status updated: they are not enriched and get no inventory job.
 
 ## Dead-letter inspection and replay
 

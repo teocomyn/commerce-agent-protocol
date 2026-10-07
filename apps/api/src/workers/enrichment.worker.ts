@@ -231,7 +231,7 @@ export const enrichmentWorker = new Worker<EnrichmentJobData>(
 
     await job.updateProgress(30)
 
-    // Drafts, archived and unlisted products must never reach agents. Search
+    // Draft and archived products must never reach agents. Search
     // filters on products_raw.status, so persisting the status above hides
     // the product immediately; skipping the LLM avoids paying for it.
     if (shopifyProduct.status !== 'active') {
