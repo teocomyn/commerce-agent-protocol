@@ -52,7 +52,7 @@ Shopify compliance webhooks are handled on the same `/webhooks/shopify` endpoint
 
 - `customers/data_request`: CAP keeps no customer profile, so the request is acknowledged and recorded.
 - `customers/redact`: the Shopify order ids listed in `orders_to_redact` are removed from `agent_checkouts`.
-- `shop/redact`: if the shop is uninstalled, every row of that merchant is deleted (products, keys, checkouts, agent queries, members, and accounts that belonged only to that shop). A `shop/redact` for a shop that is still installed is ignored and logged.
+- `shop/redact`: if the shop is uninstalled, every row of that merchant is deleted (products, keys, checkouts, agent queries, members, and accounts that belonged only to that shop). A `shop/redact` for a shop that is still installed erases nothing and fails on purpose (see above), so Shopify redelivers it.
 
 Have the export and erasure behaviour reviewed legally before an App Store submission.
 
@@ -66,9 +66,9 @@ If Redis becomes unavailable, API commands fail after about two seconds instead 
 
 ## Full catalog resync
 
-`POST /internal/operations/catalog-sync` with `{"confirm":true}` queues a full catalog sync for every active install and returns the number of queued shops. Use it after a release that changes stored product data outside enrichment. It calls Shopify for every product, but OpenAI only for active products whose title, description, vendor, type, tags or images changed since their last enrichment. Run it once, not on a schedule.
+`POST /internal/operations/catalog-sync` with `{"confirm":true}` queues a full catalog sync for every active install and returns `{ "queued": n, "ignored": m }`: a shop whose full sync (from an install, an earlier resync, a re-enrichment or any other producer) is still waiting or running is not queued again and counts as ignored. Use it after a release that changes stored product data outside enrichment. It calls Shopify for every product, but OpenAI only for active products whose title, description, vendor, type, tags or images changed since their last enrichment. Run it once, not on a schedule.
 
-A release that bumps `ENRICHMENT_VERSION` needs no manual step: when the catalog worker starts, it queues one full sync (delayed 10 minutes, so every service runs the new release first) for each active shop whose last full sync ran under another version. Expect one OpenAI call per active product of those shops. A second request while a shop's resync is still waiting or running is ignored for that shop.
+A release that bumps `ENRICHMENT_VERSION` needs no manual step: when the catalog worker starts, it queues one full sync (delayed 10 minutes, so every service runs the new release first) for each active shop whose last full sync ran under another version. Expect one OpenAI call per active product of those shops.
 
 A full sync reads every product, active or not, so a product that became a draft or was archived while its webhook was missed is hidden on the next sync. Inactive products only have their stored status updated: they are not enriched and get no inventory job.
 

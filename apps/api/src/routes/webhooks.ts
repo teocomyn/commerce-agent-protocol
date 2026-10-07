@@ -3,10 +3,10 @@ import { Hono } from 'hono'
 import { prisma, type Prisma } from '@cap/db'
 import { verifyShopifyWebhook } from '../lib/shopify.js'
 import { catalogSyncQueue, enrichmentQueue } from '../lib/queue.js'
-import { invalidateApiKeyCache, invalidateMerchantSearchCache } from '../lib/redis.js'
+import { invalidateApiKeyCache, invalidateMerchantSearchCache, purgeMerchantSearchCache } from '../lib/redis.js'
 import { extractCheckoutTrackingToken } from '../lib/webhook-utils.js'
 import { applyInventoryLevelUpdate } from '../lib/inventory.js'
-import { redactCustomerOrders, redactShop } from '../lib/retention.js'
+import { countCustomerOrderReferences, redactCustomerOrders, redactShop } from '../lib/retention.js'
 
 const webhookRouter = new Hono()
 
@@ -241,11 +241,19 @@ async function processWebhook(args: {
 
     // Mandatory GDPR compliance topics (configured in the Shopify app, not
     // registered through the API).
-    case 'customers/data_request':
-      // CAP stores no customer profile: order webhooks only keep the order id
-      // on agent_checkouts, and agent queries are not linked to a customer.
-      console.log(`[Webhook] ${shopDomain} customers/data_request: no customer data held`)
+    case 'customers/data_request': {
+      // CAP keeps no customer profile; what it holds for a customer is the
+      // Shopify order id on agent checkouts. The count is logged so the store
+      // owner's request can be answered from the logs and the webhook receipt.
+      const orderIds = Array.isArray(payload['orders_requested'])
+        ? (payload['orders_requested'] as unknown[]).map(String)
+        : []
+      const ordersReferenced = await countCustomerOrderReferences(merchantId, orderIds)
+      console.log(
+        `[Webhook] ${shopDomain} customers/data_request: ${ordersReferenced} of ${orderIds.length} requested order(s) referenced by agent checkouts (order id only)`,
+      )
       break
+    }
 
     case 'customers/redact': {
       const orderIds = Array.isArray(payload['orders_to_redact'])
@@ -266,7 +274,11 @@ async function processWebhook(args: {
       }
       await invalidateApiKeyCache(result.apiKeyHashes)
         .catch((error: unknown) => console.error('[Webhook] API key cache eviction failed:', error))
-      await invalidateMerchantSearchCache(merchantId)
+      // Erasure: delete the cached catalog responses, not just hide them.
+      await purgeMerchantSearchCache(merchantId).catch(async (error: unknown) => {
+        console.error('[Webhook] Search cache purge failed, entries expire within 120 s:', error)
+        await invalidateMerchantSearchCache(merchantId)
+      })
       return { merchantDeleted: true }
     }
   }

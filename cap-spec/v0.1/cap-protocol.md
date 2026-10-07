@@ -131,6 +131,8 @@ The CAP Server **MUST** persist enough state to reconcile the checkout against a
 - **MUST** reject the request with `409 IDEMPOTENCY_KEY_IN_PROGRESS` while the first request is still running;
 - **MUST** reject the request with `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` when the first request stopped before recording its outcome.
 
+Bodies are compared as validated requests, not as bytes: the same fields with the same values are identical whatever the JSON key order or whitespace, a field left out equals its default value (`quantity` 1), and unknown fields are ignored.
+
 A key is never released. A failed or unknown first attempt may still have created a checkout upstream (for example after a timeout), so agents retry with a **new** key once they have decided to try again.
 
 Only requests that reach checkout creation are recorded. A request rejected before it (invalid body, `PRODUCT_NOT_FOUND`, `OUT_OF_STOCK`, `SHIPPING_COUNTRY_UNAVAILABLE`…) creates nothing upstream and does not consume the key: a retry with the same key is evaluated again and can succeed once the cause is gone.

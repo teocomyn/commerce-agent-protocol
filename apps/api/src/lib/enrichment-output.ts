@@ -104,9 +104,21 @@ export function isClaimLike(value: string | number | boolean): boolean {
   return typeof value === 'string' && CLAIM_PATTERN.test(value.replace(/[_-]+/g, ' '))
 }
 
-// Free text keeps its other sentences: only the ones carrying a claim go.
+// Free text keeps its other sentences and lines: only the ones carrying a
+// claim go. Lines count as sentences, since care instructions are often a
+// list without terminal punctuation.
 function withoutClaimSentences(text: string): string {
-  return text.split(/(?<=[.!?;])\s+/).filter((sentence) => !isClaimLike(sentence)).join(' ').trim()
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.split(/(?<=[.!?;])\s+/).filter((sentence) => !isClaimLike(sentence)).join(' ').trim())
+    .filter(Boolean)
+    .join('\n')
+}
+
+// A category path keeps its claim-free levels: "Organic > Cotton > T-shirts"
+// becomes "Cotton > T-shirts".
+function withoutClaimLevels(category: string): string {
+  return category.split('>').map((level) => level.trim()).filter((level) => level && !isClaimLike(level)).join(' > ')
 }
 
 // Object.fromEntries keeps the last duplicate; the first occurrence wins here
@@ -119,17 +131,27 @@ function firstEntries<V>(entries: Array<readonly [string, V]>): Record<string, V
   return result
 }
 
-export function normalizeLlmEnrichment(output: z.infer<typeof LlmEnrichmentSchema>): EnrichmentOutput {
+/**
+ * `fallbackSummary` (the merchant's own product title) replaces a summary
+ * whose only sentence carried a claim, so no product is served or embedded
+ * with an empty summary.
+ */
+export function normalizeLlmEnrichment(
+  output: z.infer<typeof LlmEnrichmentSchema>,
+  fallbackSummary = '',
+): EnrichmentOutput {
   const specs = firstEntries(output.specs
     .filter((spec) => !isClaimLike(spec.name) && !isClaimLike(spec.value))
     .map((spec) => [spec.name.trim(), spec.value] as const))
   const careInfo = output.care_info ? withoutClaimSentences(output.care_info) : ''
-  const sizeGuide = output.size_guide && output.size_guide.length > 0
-    ? firstEntries(output.size_guide.map((row) => [row.size.trim(), row.measurements] as const))
+  const sizeRows = (output.size_guide ?? [])
+    .filter((row) => !isClaimLike(row.size) && !isClaimLike(row.measurements))
+  const sizeGuide = sizeRows.length > 0
+    ? firstEntries(sizeRows.map((row) => [row.size.trim(), row.measurements] as const))
     : undefined
   return EnrichmentOutputSchema.parse({
-    category: output.category,
-    subcategory: output.subcategory,
+    category: withoutClaimLevels(output.category) || 'Other',
+    subcategory: isClaimLike(output.subcategory) ? '' : output.subcategory,
     specs,
     use_cases: output.use_cases.filter((useCase) => !isClaimLike(useCase)),
     target_audience: output.target_audience.filter((audience) => !isClaimLike(audience)),
@@ -137,6 +159,6 @@ export function normalizeLlmEnrichment(output: z.infer<typeof LlmEnrichmentSchem
     ...(sizeGuide && { size_guide: sizeGuide }),
     // The summary feeds the embedding: a claim in it would still let agents
     // match products on certifications the merchant never declared.
-    summary: withoutClaimSentences(output.summary),
+    summary: withoutClaimSentences(output.summary) || fallbackSummary.trim(),
   })
 }

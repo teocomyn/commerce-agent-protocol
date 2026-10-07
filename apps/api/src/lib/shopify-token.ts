@@ -80,9 +80,10 @@ export async function getValidShopifyAdminToken(merchantId: string): Promise<str
         where: { id: merchantId },
         data: {
           shopifyToken: encryptToken(refreshed.accessToken),
-          shopifyRefreshToken: refreshed.refreshToken
-            ? encryptToken(refreshed.refreshToken)
-            : merchant.shopifyRefreshToken,
+          // Without a replacement, the stored refresh token is left untouched:
+          // writing back the value read earlier could restore a ciphertext the
+          // re-encryption script replaced meanwhile (old key).
+          ...(refreshed.refreshToken && { shopifyRefreshToken: encryptToken(refreshed.refreshToken) }),
           accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
           refreshTokenExpiresAt: refreshed.refreshTokenExpiresAt,
           grantedScopes: refreshed.grantedScopes,

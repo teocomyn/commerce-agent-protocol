@@ -71,8 +71,8 @@ docker compose up -d
 
 # 2. Environment
 cp .env.example .env
-# Fill in at minimum: DATABASE_URL, REDIS_URL, OPENAI_API_KEY, and SHOPIFY_*
-# if you connect a store. Replace every `change_me` value: processes refuse to
+# Fill in at minimum: DATABASE_URL, REDIS_URL, OPENAI_API_KEY, ENCRYPTION_KEY,
+# and SHOPIFY_* if you connect a store. Replace every `change_me` value: processes refuse to
 # start with example secrets. Generate secrets with:
 openssl rand -hex 32   # ENCRYPTION_KEY, CAP_OPERATIONS_TOKEN, DASHBOARD_SESSION_SECRET
 

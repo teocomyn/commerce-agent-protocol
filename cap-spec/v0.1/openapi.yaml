@@ -101,8 +101,10 @@ paths:
             Client-generated key (1-255 ASCII letters, digits, _ - . :).
             Retrying with the same key and body replays the first response
             (header Idempotent-Replayed: true) instead of creating a second
-            checkout. Requests rejected before checkout creation (validation,
-            not found, out of stock) do not consume the key.
+            checkout. Bodies are compared after validation (key order,
+            whitespace and unknown fields do not matter; an omitted field
+            equals its default). Requests rejected before checkout creation
+            (validation, not found, out of stock) do not consume the key.
           schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,255}$' }
       requestBody:
         required: true

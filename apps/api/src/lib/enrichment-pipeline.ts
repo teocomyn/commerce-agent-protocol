@@ -85,7 +85,7 @@ async function enrichProduct(
   const content = response.choices[0]?.message?.content
   if (!content) throw new Error('Empty LLM response')
 
-  return normalizeLlmEnrichment(LlmEnrichmentSchema.parse(JSON.parse(content)))
+  return normalizeLlmEnrichment(LlmEnrichmentSchema.parse(JSON.parse(content)), title)
 }
 
 // ============================================================
@@ -301,7 +301,13 @@ export async function runEnrichmentJob(
     await catalogSyncQueue.addBulk(staleInventoryItemIds.map((inventoryItemId) => ({
       name: 'inventory-level-sync',
       data: { merchantId, shopDomain, kind: 'inventory' as const, inventoryItemId },
-      opts: { priority: 2, jobId: `inventory-snapshot-${merchantId}-${inventoryItemId}-${job.id}` },
+      opts: {
+        priority: 2,
+        jobId: `inventory-snapshot-${merchantId}-${inventoryItemId}-${job.id}`,
+        // Overlapping enrichment jobs of one product (webhook and full sync)
+        // schedule one snapshot per item, not one each.
+        deduplication: { id: `inventory-snapshot-${merchantId}-${inventoryItemId}` },
+      },
     })))
   }
 

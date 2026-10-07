@@ -12,8 +12,9 @@ export const metadata: Metadata = { referrer: 'no-referrer' }
 type Viewer =
   | 'invalid-invitation' // malformed, unknown, expired, used or revoked link
   | 'invitee' // signed in with the invited, password-protected account
+  | 'passwordless-invitee' // signed in with the invited account, no password yet
   | 'other-account' // signed in with an account that is not the invitee
-  | 'anonymous' // not signed in (or invitee without a password yet)
+  | 'anonymous' // not signed in
 
 async function invitationViewer(token: string): Promise<Viewer> {
   if (!isInvitationTokenFormat(token)) return 'invalid-invitation'
@@ -41,9 +42,9 @@ async function invitationViewer(token: string): Promise<Viewer> {
     select: { email: true, passwordHash: true },
   })
   if (user?.email !== invitation.email) return 'other-account'
-  // The invited account has no password yet: acceptance sets its first one
-  // through the regular form, so it is treated like a new account.
-  return user.passwordHash ? 'invitee' : 'anonymous'
+  // The invited account has no password yet (a Shopify owner, for example):
+  // acceptance sets its first one through the password form.
+  return user.passwordHash ? 'invitee' : 'passwordless-invitee'
 }
 
 export default async function AcceptInvitationPage({
@@ -80,6 +81,7 @@ export default async function AcceptInvitationPage({
         <h1 style={{ margin: '24px 0 6px', fontSize: 28, letterSpacing: '-0.03em' }}>Join your team</h1>
         <p style={{ margin: '0 0 24px', color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.6 }}>
           {viewer === 'invitee' && 'You are signed in with the invited account. Accept to add this merchant to your CAP dashboard access. The invitation can only be used once.'}
+          {viewer === 'passwordless-invitee' && 'You are signed in with the invited account. Choose a password to accept the invitation and sign in with email from now on. The invitation can only be used once.'}
           {viewer === 'anonymous' && 'Create your account to access this merchant’s CAP dashboard. The invitation can only be used once.'}
           {viewer === 'other-account' && 'This invitation is for another account. Sign out first, then sign in as the invited account or create it from this link.'}
         </p>

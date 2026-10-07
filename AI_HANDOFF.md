@@ -2,7 +2,7 @@
 
 Updated: 2026-10-08
 Agent/tool: Claude Code (with a sub-agent for apps/dashboard)
-Branch: `chore/p2-reliability`, stacked on `chore/p0-hardening` (PR #34)
+Branch: `chore/p2-reliability` = PR #35 (→ `main`, contains all of PR #34). P0 is `chore/p0-hardening` = PR #34 (→ `main`).
 
 ## Status of earlier work
 
@@ -29,7 +29,7 @@ Branch: `chore/p2-reliability`, stacked on `chore/p0-hardening` (PR #34)
   - compare-and-set in `reencrypt-tokens`;
   - catalog sync: inactive products only update their status;
   - resync deduplication per shop.
-- PR #35: P0 merged in (`9f7f11f`):
+- PR #35 (this branch, `chore/p2-reliability`): P0 merged in (`9f7f11f`):
   - the Storefront token is decrypted before the checkout row exists;
   - `ENRICHMENT_VERSION` is bumped to `2026-10-08.2`;
   - the `shopify_updated_at` guard is now atomic with the raw product write (`bce3e11`).
@@ -52,12 +52,12 @@ Branch: `chore/p2-reliability`, stacked on `chore/p0-hardening` (PR #34)
 
 ## Blockers and decisions needed
 
-- Merge PR #34, then the P2 PR (GitHub retargets it to `main` once `chore/p0-hardening` is merged and deleted).
+- Merge PR #34 (`chore/p0-hardening`), then PR #35 (`chore/p2-reliability`).
 - Configure the three Shopify compliance topics in the app settings before an App Store submission; legal review of erasure.
 - Email verification for invitations and an error-tracking vendor need product/billing decisions.
 - Strategic positioning vs UCP/ACP (P1).
 
 ## Next concrete action
 
-- The user merges PR #34, then PR #35. The agent's auto-mode guard blocks `gh pr merge`.
+- The user merges PR #34 (`chore/p0-hardening`), then PR #35 (`chore/p2-reliability`). The agent's auto-mode guard blocks `gh pr merge`.
 - No manual resync is needed after deploying. The catalog worker re-enriches every active shop automatically, 10 minutes after starting, because `ENRICHMENT_VERSION` changed. This sets `shopify_updated_at` and re-applies claim filtering.

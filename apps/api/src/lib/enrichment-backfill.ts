@@ -1,6 +1,6 @@
 import { prisma } from '@cap/db'
 import { ENRICHMENT_VERSION } from './enrichment-output.js'
-import { catalogSyncQueue } from './queue.js'
+import { queueFullCatalogSync } from './queue.js'
 
 // Leaves time for every service of a deploy to run the new release before the
 // products are enriched again, so no job is processed by an older worker.
@@ -10,8 +10,9 @@ const BACKFILL_DELAY_MS = 10 * 60 * 1_000
  * Products enriched by an older release (a new prompt or normalization, or
  * claims cleared by a migration) are enriched again without an operator step:
  * one full sync is queued per active install whose last completed full sync
- * ran under another ENRICHMENT_VERSION. The job id is stable per shop and
- * version, so restarts and concurrent workers queue it once.
+ * ran under another ENRICHMENT_VERSION. A shop whose full sync is already
+ * waiting or running (this one after a restart, or any other producer) is
+ * not queued twice. Returns the number of shops newly queued.
  */
 export async function queueOutdatedEnrichmentResyncs(): Promise<number> {
   const merchants = await prisma.$queryRaw<Array<{ id: string; shopify_domain: string }>>`
@@ -21,15 +22,15 @@ export async function queueOutdatedEnrichmentResyncs(): Promise<number> {
       AND shopify_token IS NOT NULL
       AND COALESCE(settings->>'enrichmentVersion', '') <> ${ENRICHMENT_VERSION}
   `
-  if (merchants.length === 0) return 0
-  await catalogSyncQueue.addBulk(merchants.map((merchant) => ({
-    name: 'full-catalog-sync',
-    data: { merchantId: merchant.id, shopDomain: merchant.shopify_domain },
-    opts: {
-      jobId: `enrichment-version-${ENRICHMENT_VERSION}-${merchant.id}`,
+  const requestedAt = Date.now()
+  const queued = await Promise.all(merchants.map((merchant) => queueFullCatalogSync(
+    merchant.id,
+    merchant.shopify_domain,
+    {
+      jobId: `enrichment-version-${ENRICHMENT_VERSION}-${merchant.id}-${requestedAt}`,
       delay: BACKFILL_DELAY_MS,
       priority: 5,
     },
-  })))
-  return merchants.length
+  )))
+  return queued.filter(Boolean).length
 }

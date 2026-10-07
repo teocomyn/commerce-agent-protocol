@@ -104,6 +104,22 @@ export async function invalidateMerchantSearchCache(merchantId: string): Promise
   }
 }
 
+/**
+ * Deletes every cached search of a merchant, for shop erasure: a generation
+ * bump only hides the entries until they expire, and an erased shop's
+ * catalog must not stay in Redis at all.
+ */
+export async function purgeMerchantSearchCache(merchantId: string): Promise<void> {
+  const keys: string[] = []
+  for await (const batch of redis.scanStream({ match: `search:${merchantId}:*`, count: 500 })) {
+    keys.push(...(batch as string[]))
+  }
+  keys.push(searchGenerationKey(merchantId))
+  for (let index = 0; index < keys.length; index += 500) {
+    await redis.del(...keys.slice(index, index + 500))
+  }
+}
+
 // Rate limiting: sliding window counter
 export async function rateLimit(
   key: string,

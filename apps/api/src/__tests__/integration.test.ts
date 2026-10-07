@@ -19,7 +19,13 @@ import {
 import { runRetention } from '../lib/retention.js'
 import { queueOutdatedEnrichmentResyncs } from '../lib/enrichment-backfill.js'
 import { ENRICHMENT_VERSION } from '../lib/enrichment-output.js'
-import { catalogSyncQueue, deadLetterQueue, enrichmentQueue, maintenanceQueue } from '../lib/queue.js'
+import {
+  catalogSyncQueue,
+  deadLetterQueue,
+  enrichmentQueue,
+  maintenanceQueue,
+  queueFullCatalogSync,
+} from '../lib/queue.js'
 import { getValidShopifyAdminToken } from '../lib/shopify-token.js'
 import { checkReadiness, operationsRouter } from '../routes/operations.js'
 
@@ -410,7 +416,17 @@ describe.sequential('CAP integration boundaries', () => {
 
   it('reports uninstalled or erased shops as inactive installs', async () => {
     const { InactiveInstallError } = await import('../lib/shopify-token.js')
+    // Erased: the merchant row no longer exists.
     await expect(getValidShopifyAdminToken(crypto.randomUUID())).rejects.toBeInstanceOf(InactiveInstallError)
+    // Uninstalled: the row is kept, without a token.
+    const uninstalled = await prisma.merchant.create({
+      data: { shopifyDomain: `inactive-${suffix}.myshopify.com`, uninstalledAt: new Date() },
+    })
+    try {
+      await expect(getValidShopifyAdminToken(uninstalled.id)).rejects.toBeInstanceOf(InactiveInstallError)
+    } finally {
+      await prisma.merchant.delete({ where: { id: uninstalled.id } })
+    }
   })
 
   it('rotates expiring offline credentials and disables an install that loses scopes', async () => {
@@ -568,6 +584,9 @@ describe.sequential('CAP integration boundaries', () => {
     expect(replay.status).toBe(200)
     expect(replay.headers.get('Idempotent-Replayed')).toBe('true')
     expect(await replay.json()).toEqual(firstBody)
+    // Same request, re-serialized: other key order, default left out.
+    const reordered = await send({ shipping_country: 'FR', product_id: productA })
+    expect(reordered.headers.get('Idempotent-Replayed')).toBe('true')
     expect(createShopifyCartMock).toHaveBeenCalledTimes(1)
 
     const reused = await send({ ...body, quantity: 2 })
@@ -738,12 +757,21 @@ describe.sequential('CAP integration boundaries', () => {
         shopifyOrderId: '555001',
       },
     })
+    // A data request reports the order references CAP holds for the customer.
+    const log = vi.spyOn(console, 'log')
+    try {
+      expect((await signedWebhook('customers/data_request', domains[0]!, `data-request-${suffix}`, {
+        orders_requested: [555001, 555002],
+      })).status).toBe(200)
+      expect(log.mock.calls.some(([line]) => String(line).includes('1 of 2 requested order(s)'))).toBe(true)
+    } finally {
+      log.mockRestore()
+    }
+
     expect((await signedWebhook('customers/redact', domains[0]!, `redact-${suffix}`, {
       orders_to_redact: [555001],
     })).status).toBe(200)
     expect((await prisma.agentCheckout.findUniqueOrThrow({ where: { id: checkout.id } })).shopifyOrderId).toBeNull()
-
-    expect((await signedWebhook('customers/data_request', domains[0]!, `data-request-${suffix}`)).status).toBe(200)
 
     // An installed shop is never erased. The webhook fails (durable failed
     // event) so Shopify redelivers once the uninstall is recorded.
@@ -762,8 +790,12 @@ describe.sequential('CAP integration boundaries', () => {
     const keyB = await createKey(merchantB, 'gdpr-cached-key')
     const keyBHash = crypto.createHash('sha256').update(keyB).digest('hex')
     await redis.set(`apikey:${keyBHash}`, JSON.stringify({ merchantId: merchantB }))
+    const cachedSearch = await searchCacheKey(merchantB, { query: 'gdpr' })
+    await redis.set(cachedSearch!, JSON.stringify({ results: [] }), 'EX', 120)
     expect((await signedWebhook('shop/redact', domains[1]!, `shop-redact-b-${suffix}`)).status).toBe(200)
     expect(JSON.parse(await redis.get(`apikey:${keyBHash}`) ?? 'null')).toBe('invalidated')
+    // Erased, not just hidden: no cached search of the shop is left.
+    expect(await redis.exists(cachedSearch!, `search:gen:${merchantB}`)).toBe(0)
     expect(await prisma.merchant.findUnique({ where: { id: merchantB } })).toBeNull()
     expect(await prisma.productEnriched.findUnique({ where: { id: productB } })).toBeNull()
     expect(await prisma.agentQuery.count({ where: { queryText: `gift idea ${suffix}` } })).toBe(0)
@@ -784,6 +816,16 @@ describe.sequential('CAP integration boundaries', () => {
     const orphan = await prisma.agentQuery.create({
       data: { merchantId: null, agentId: 'retention', queryText: 'orphan query' },
     })
+    // A receipt left `processing` by a crashed attempt is deleted too.
+    const staleReceipt = await prisma.webhookEvent.create({
+      data: {
+        webhookId: `stale-processing-${suffix}`,
+        merchantId: merchantA,
+        topic: 'products/update',
+        status: 'processing',
+        receivedAt: new Date(Date.now() - 60 * 86_400_000),
+      },
+    })
     const originalRetention = process.env.AGENT_QUERY_RETENTION_DAYS
     process.env.AGENT_QUERY_RETENTION_DAYS = '180'
     let result: Awaited<ReturnType<typeof runRetention>>
@@ -797,6 +839,7 @@ describe.sequential('CAP integration boundaries', () => {
     expect(await prisma.agentQuery.findUnique({ where: { id: orphan.id } })).toBeNull()
     expect(await prisma.agentQuery.findUnique({ where: { id: old.id } })).toBeNull()
     expect(await prisma.agentQuery.findUnique({ where: { id: fresh.id } })).not.toBeNull()
+    expect(await prisma.webhookEvent.findUnique({ where: { id: staleReceipt.id } })).toBeNull()
   })
 
   it('invalidates a merchant search cache in one step', async () => {
@@ -851,10 +894,19 @@ describe.sequential('CAP integration boundaries', () => {
       const jobs = await catalogSyncQueue.getJobs(['waiting', 'prioritized', 'delayed'])
       expect(jobs.some((job) => job.id?.startsWith(`operations-resync-${merchantA}-`))).toBe(true)
 
-      // A second confirmation while those jobs wait does not queue them twice.
-      expect((await request({ confirm: true })).status).toBe(200)
+      // A second confirmation while those jobs wait does not queue them twice,
+      // and says so.
+      const retry = await request({ confirm: true })
+      expect(retry.status).toBe(200)
+      expect(await retry.json()).toMatchObject({ ignored: queued })
       const afterRetry = await catalogSyncQueue.getJobs(['waiting', 'prioritized', 'delayed'])
-      expect(afterRetry.filter((job) => job.id?.startsWith(`operations-resync-${merchantA}-`))).toHaveLength(1)
+      const merchantAJobs = afterRetry.filter((job) => job.id?.startsWith(`operations-resync-${merchantA}-`))
+      expect(merchantAJobs).toHaveLength(1)
+
+      // Removing the waiting job releases the shop: it can be queued again.
+      await merchantAJobs[0]!.remove()
+      expect(await queueFullCatalogSync(merchantA, domains[0]!, { jobId: `operations-resync-${merchantA}-again` }))
+        .toBe(true)
     } finally {
       delete process.env.CAP_OPERATIONS_TOKEN
       // The fake stores must never reach a running catalog worker.
@@ -867,9 +919,9 @@ describe.sequential('CAP integration boundaries', () => {
 
   it('queues one re-enrichment per shop after an enrichment version change', async () => {
     const startedAt = Date.now()
-    const jobId = `enrichment-version-${ENRICHMENT_VERSION}-${merchantA}`
+    const jobPrefix = `enrichment-version-${ENRICHMENT_VERSION}-${merchantA}-`
     const queuedFor = async () => (await catalogSyncQueue.getJobs(['delayed', 'waiting', 'prioritized']))
-      .filter((job) => job.id === jobId)
+      .filter((job) => job.id?.startsWith(jobPrefix))
     try {
       await prisma.$executeRaw`
         UPDATE merchants SET settings = settings || '{"enrichmentVersion":"2000-01-01"}'::jsonb

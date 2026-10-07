@@ -542,6 +542,9 @@ export async function startMcpServer() {
  * alive after every client restart, so EOF and signals both drain and exit.
  */
 export async function runMcpOverStdio(): Promise<void> {
+  // Every tool needs the merchant: fail the spawn with the configuration
+  // error instead of listing tools that all fail when called.
+  getMcpMerchantId()
   const server = await startMcpServer()
   const shutdown = registerGracefulShutdown('mcp', [
     { name: 'mcp', close: () => server.close() },

@@ -35,9 +35,10 @@ export async function runRetention(now = new Date()): Promise<RetentionResult> {
     prisma.agentQuery.deleteMany({
       where: { OR: [{ createdAt: { lt: agentQueryCutoff } }, { merchantId: null }] },
     }),
-    prisma.webhookEvent.deleteMany({
-      where: { receivedAt: { lt: webhookCutoff }, status: { in: ['completed', 'failed'] } },
-    }),
+    // Every status: a receipt still `processing` after the retention period
+    // belongs to a crashed attempt (the handler treats them as stale after
+    // five minutes) and would otherwise never be deleted.
+    prisma.webhookEvent.deleteMany({ where: { receivedAt: { lt: webhookCutoff } } }),
     prisma.dashboardLoginToken.deleteMany({
       where: { OR: [{ expiresAt: { lt: before(1) } }, { consumedAt: { lt: before(1) } }] },
     }),
@@ -103,6 +104,16 @@ export async function redactShop(
 }
 
 /** Shopify `customers/redact`: drop the order references CAP keeps. */
+/**
+ * What CAP holds for a customers/data_request: only Shopify order ids on
+ * agent checkouts (no name, email or address; agent queries are not linked to
+ * a customer). Returns how many of the requested orders are referenced.
+ */
+export async function countCustomerOrderReferences(merchantId: string, orderIds: string[]): Promise<number> {
+  if (orderIds.length === 0) return 0
+  return prisma.agentCheckout.count({ where: { merchantId, shopifyOrderId: { in: orderIds } } })
+}
+
 export async function redactCustomerOrders(merchantId: string, orderIds: string[]): Promise<number> {
   if (orderIds.length === 0) return 0
   const result = await prisma.agentCheckout.updateMany({
