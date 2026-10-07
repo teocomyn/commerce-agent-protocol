@@ -1,6 +1,6 @@
 # Commerce Agent Protocol (CAP) — AI Context
 
-Updated: 2026-10-07
+Updated: 2026-10-08
 
 ## Purpose
 
@@ -43,13 +43,18 @@ Prototype / unrelated standalone product. No paying user, no adopter, no product
 - Example secrets are rejected at boot (API, workers, MCP, dashboard). Production requires `ENCRYPTION_KEY` as 64 hex chars or base64 of 32 bytes; new ciphertexts use the `v2:` format; `ENCRYPTION_KEY_PREVIOUS` supports rotation.
 - No `db:push`: schema changes ship as migrations, CI checks drift. The pgvector `embedding` column is declared `Unsupported("vector(1536)")`.
 - Owner sign-in after OAuth requires a same-origin confirmation POST (`/session/confirm`); invitation acceptance never checks passwords for existing accounts.
+- Dashboard sessions carry the membership version (`mv` = `merchant_members.updated_at`); any membership write signs that member out everywhere. Password hashes store their scrypt parameters (`scrypt$N=…,r=…,p=…$salt$key`) and are upgraded on login.
+- Enrichment calls OpenAI only when `products_enriched.source_hash` (content + `ENRICHMENT_VERSION`) changes; bump `ENRICHMENT_VERSION` after prompt or schema changes.
+- `POST /v1/checkout/initiate` supports `Idempotency-Key` (stored on `agent_checkouts`, replayed with `Idempotent-Replayed: true`).
+- GDPR: Shopify compliance topics handled on `/webhooks/shopify`; daily `maintenance` job (03:00 UTC, catalog worker) purges agent queries after 180 days and webhook receipts after 30 days.
+- Processes run `node` as PID 1 and drain on SIGTERM; every Render service runs `pnpm db:migrate` before deploy.
 
 ## Known risks and constraints
 
 - Strategic: Google + Shopify UCP (Jan 2026) and OpenAI + Stripe ACP (Sep 2025) cover the same ground, and Shopify reportedly enables UCP and native MCP servers for its merchants. CAP only supports Shopify. Positioning decision pending (recommended: GEO/catalog-quality layer that feeds UCP/ACP).
 - MCP is stdio-only with direct database access and the master encryption key; not usable as a remote connector.
-- No Shopify GDPR compliance webhooks, no data retention jobs, no graceful shutdown, no checkout idempotency (see plan P2 in `AI_HANDOFF.md`).
+- No email verification (invitation email squatting), no observability vendor (Sentry or similar), no remote MCP transport.
 
 ## Current delivery milestone
 
-P0 hardening on branch `chore/p0-hardening` (2026-10-07). Next: strategic decision (P1), then reliability work (P2).
+P0 hardening (PR #34, branch `chore/p0-hardening`) and P2 reliability (branch `chore/p2-reliability`, stacked on it), 2026-10-08. Next: merge both, then the P1 strategic decision.

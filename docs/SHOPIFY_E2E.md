@@ -26,7 +26,7 @@ Create a separate app and development store in the Shopify Dev Dashboard. Config
 
 The install requests an expiring offline token. Shopify returns a 60-minute access token and a refresh token; CAP encrypts both and refreshes five minutes early. If a refresh no longer contains every required scope, CAP deletes the unusable credentials and requires reinstalling the app.
 
-For an App Store distribution, configure the mandatory `customers/data_request`, `customers/redact`, and `shop/redact` compliance topics in the Dev Dashboard. Implement and legally review the associated export/redaction workflow before App Store submission; a successful commerce E2E test does not replace this compliance gate.
+For an App Store distribution, configure the mandatory `customers/data_request`, `customers/redact`, and `shop/redact` compliance topics in the Dev Dashboard with the same delivery URL (`/webhooks/shopify`). CAP handles all three (see `docs/OPERATIONS.md`, "Data retention and GDPR"). Have the export and erasure behaviour reviewed legally before App Store submission; a successful commerce E2E test does not replace this compliance gate.
 
 References: [offline access tokens](https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens), [expiring-token migration](https://shopify.dev/docs/apps/build/authentication-authorization/migrate-to-expiring-offline-access-tokens), [Admin webhook creation](https://shopify.dev/docs/api/admin-graphql/2026-07/mutations/webhookSubscriptionCreate), [Storefront carts](https://shopify.dev/docs/storefronts/headless/building-with-the-storefront-api/cart/manage), and [privacy webhooks](https://shopify.dev/docs/apps/build/compliance/privacy-law-compliance).
 
