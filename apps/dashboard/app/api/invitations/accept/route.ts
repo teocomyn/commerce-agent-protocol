@@ -57,9 +57,12 @@ export async function POST(req: NextRequest) {
   }
 
   const tokenHash = hashInvitationToken(rawToken)
+  // The token bucket is the real control (tokens carry 256 random bits); the
+  // address bucket is a loose abuse ceiling, high enough that colleagues
+  // behind one office NAT can each accept their own invitation.
   const sourceKey = crypto.createHash('sha256').update(clientAddress(req)).digest('hex')
   const blocked = (await Promise.all([
-    consumeDashboardInvitationAttempt(`ip:${sourceKey}`),
+    consumeDashboardInvitationAttempt(`ip:${sourceKey}`, 100),
     consumeDashboardInvitationAttempt(`token:${tokenHash}`),
   ])).filter((attempt) => !attempt.allowed)
   if (blocked.length > 0) {

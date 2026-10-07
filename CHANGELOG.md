@@ -35,7 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Jobs for an uninstalled or erased shop are skipped instead of retried.
 
 ### Security
-- Processes refuse to start with `.env.example` secrets. Production requires a 32-byte `ENCRYPTION_KEY` (hex or base64); new tokens use the `v2:` ciphertext format and `ENCRYPTION_KEY_PREVIOUS` supports rotation.
+- The API, workers, MCP server and dashboard refuse to start with the `.env.example` values of `ENCRYPTION_KEY`, `CAP_OPERATIONS_TOKEN` and `DASHBOARD_SESSION_SECRET`, or with trivially guessable values; in production the Shopify app secret must also be set. Production requires a 32-byte `ENCRYPTION_KEY` (hex or base64); new tokens use the `v2:` ciphertext format, `ENCRYPTION_KEY_PREVIOUS` supports rotation, and `pnpm --filter @cap/api reencrypt-tokens` re-encrypts stored tokens.
 - Invitation acceptance no longer verifies passwords of existing accounts (it requires a session of the invited user instead) and is rate limited per IP and per invitation.
 - Owner sign-in after Shopify OAuth goes through a same-origin confirmation step, closing login CSRF.
 - Uninstalling the app revokes pending invitations and unused sign-in links.

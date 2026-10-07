@@ -17,7 +17,7 @@ import { invalidateMerchantSearchCache, redis } from '../lib/redis.js'
 import { assertRuntimeSecrets } from '../lib/secrets.js'
 import { registerGracefulShutdown } from '../lib/shutdown.js'
 
-assertRuntimeSecrets()
+assertRuntimeSecrets(process.env, { mode: 'worker' })
 
 export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
   'catalog-sync',

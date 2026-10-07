@@ -1,29 +1,33 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { z } from 'zod'
 import { prisma } from '@cap/db'
-import { parseJsonBody } from '@/lib/api-route'
 import {
   createDashboardSessionToken,
   dashboardSessionCookie,
   isSameOriginMutation,
   membershipVersion,
 } from '@/lib/dashboard-session'
-import { findPendingOwnerLoginToken, isOwnerLoginTokenFormat } from '@/lib/owner-login'
-
-const ownerSessionSchema = z.object({ token: z.string() })
+import {
+  OWNER_LOGIN_COOKIE,
+  findPendingOwnerLoginToken,
+  isOwnerLoginTokenFormat,
+  ownerLoginCookieOptions,
+} from '@/lib/owner-login'
 
 /**
  * Landing URL of the cross-site redirect from the API after Shopify OAuth.
- * It never consumes the token or sets a cookie: a cross-site GET cannot be
- * distinguished from login CSRF, so the browser is sent to a same-origin
- * confirmation page that POSTs the token back.
+ * It never consumes the token or creates a session: a cross-site GET cannot be
+ * distinguished from login CSRF. The token moves into a short-lived HttpOnly
+ * cookie and the browser goes to a same-origin confirmation page, whose POST
+ * consumes it. The token is not kept in the confirmation URL or history.
  */
 export async function GET(req: NextRequest) {
   const rawToken = req.nextUrl.searchParams.get('token') ?? ''
-  const url = new URL('/session/confirm', req.url)
-  if (isOwnerLoginTokenFormat(rawToken)) url.searchParams.set('token', rawToken)
-
-  const response = NextResponse.redirect(url, 303)
+  const response = NextResponse.redirect(new URL('/session/confirm', req.url), 303)
+  if (isOwnerLoginTokenFormat(rawToken)) {
+    response.cookies.set(OWNER_LOGIN_COOKIE, rawToken, ownerLoginCookieOptions())
+  } else {
+    response.cookies.set(OWNER_LOGIN_COOKIE, '', ownerLoginCookieOptions(0))
+  }
   response.headers.set('Cache-Control', 'no-store')
   response.headers.set('Referrer-Policy', 'no-referrer')
   return response
@@ -33,9 +37,8 @@ export async function POST(req: NextRequest) {
   if (!isSameOriginMutation(req)) {
     return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })
   }
-  const body = await parseJsonBody(req, ownerSessionSchema, 'A login token is required')
-  if (!body.ok) return body.response
-  const rawToken = body.value.token
+  // The sign-in token travels in the HttpOnly handoff cookie, not in the body.
+  const rawToken = req.cookies.get(OWNER_LOGIN_COOKIE)?.value ?? ''
 
   const now = new Date()
   const loginToken = await findPendingOwnerLoginToken(rawToken, now)
@@ -73,6 +76,7 @@ export async function POST(req: NextRequest) {
   const response = NextResponse.json({ authenticated: true, redirect: '/dashboard' })
   const cookie = dashboardSessionCookie(sessionToken)
   response.cookies.set(cookie.name, cookie.value, cookie.options)
+  response.cookies.set(OWNER_LOGIN_COOKIE, '', ownerLoginCookieOptions(0))
   response.headers.set('Cache-Control', 'no-store')
   return response
 }

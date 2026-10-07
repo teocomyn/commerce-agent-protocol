@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { type FormEvent, useState, useTransition } from 'react'
 
-export default function ConfirmOwnerSessionForm({ token }: { token: string }) {
+export default function ConfirmOwnerSessionForm() {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -12,11 +12,14 @@ export default function ConfirmOwnerSessionForm({ token }: { token: string }) {
     event.preventDefault()
     setError(null)
     startTransition(async () => {
-      const response = await fetch('/api/session/merchant', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
-      })
+      let response: Response
+      try {
+        // The sign-in token travels in an HttpOnly cookie, not in the body.
+        response = await fetch('/api/session/merchant', { method: 'POST' })
+      } catch {
+        setError('Network error. Check your connection and try again.')
+        return
+      }
       const data = await response.json().catch(() => ({})) as { error?: string; redirect?: string }
       if (!response.ok) {
         setError(data.error ?? 'Unable to sign in')

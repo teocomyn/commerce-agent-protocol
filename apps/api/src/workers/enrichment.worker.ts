@@ -14,7 +14,7 @@ import { assertRuntimeSecrets } from '../lib/secrets.js'
 import { registerGracefulShutdown } from '../lib/shutdown.js'
 import { runEnrichmentJob } from '../lib/enrichment-pipeline.js'
 
-assertRuntimeSecrets()
+assertRuntimeSecrets(process.env, { mode: 'worker' })
 
 export const enrichmentWorker = new Worker<EnrichmentJobData>(
   'enrichment',

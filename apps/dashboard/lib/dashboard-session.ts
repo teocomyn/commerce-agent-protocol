@@ -128,12 +128,52 @@ export function dashboardSessionCookie(token: string) {
   }
 }
 
+function firstHeaderValue(request: Request, name: string): string | undefined {
+  return request.headers.get(name)?.split(',')[0]?.trim() || undefined
+}
+
+/**
+ * Origins allowed to send cookie-authenticated mutations. Behind Render's
+ * proxy, request.url carries the internal scheme (http), so the public origin
+ * comes from DASHBOARD_URL, or else from the forwarded scheme and host.
+ */
+function expectedOrigins(request: Request): string[] {
+  const origins: string[] = []
+  const configured = process.env.DASHBOARD_URL
+  if (configured) {
+    try {
+      origins.push(new URL(configured).origin)
+    } catch {
+      // Ignored: an invalid DASHBOARD_URL falls back to the request origin.
+    }
+  }
+  if (origins.length === 0 || process.env.NODE_ENV !== 'production') {
+    const url = new URL(request.url)
+    const scheme = firstHeaderValue(request, 'x-forwarded-proto') ?? url.protocol.replace(':', '')
+    const host = firstHeaderValue(request, 'x-forwarded-host') ?? request.headers.get('host') ?? url.host
+    origins.push(`${scheme}://${host}`)
+  }
+  return origins
+}
+
+/** Compares the full origin (scheme, host and port), not only the host. */
 export function isSameOriginMutation(request: Request): boolean {
   const origin = request.headers.get('origin')
   if (!origin) return process.env.NODE_ENV !== 'production'
   try {
-    return new URL(origin).host === new URL(request.url).host
+    return expectedOrigins(request).includes(new URL(origin).origin)
   } catch {
     return false
   }
+}
+
+/**
+ * Client address for rate limiting. Render's proxy appends the address it saw
+ * to X-Forwarded-For, so the rightmost entry is the one a client cannot forge;
+ * leftmost entries are client-supplied. (Assumes no other proxy in front.)
+ */
+export function clientAddress(request: Request): string {
+  const forwarded = request.headers.get('x-forwarded-for')
+  const hops = forwarded?.split(',').map((hop) => hop.trim()).filter(Boolean) ?? []
+  return hops.at(-1) ?? 'unknown'
 }

@@ -49,11 +49,14 @@ async function consumeDashboardAttempt(
   const count = await dashboardRedis.incr(redisKey)
   if (count === 1) await dashboardRedis.expire(redisKey, ATTEMPT_WINDOW_SECONDS)
   let ttl = await dashboardRedis.ttl(redisKey)
-  if (ttl < 0) {
+  if (ttl === -1) {
     // The key lost (or never received) its expiry, e.g. after a crash between
     // INCR and EXPIRE. Re-arm it so the counter cannot lock users out forever.
     await dashboardRedis.expire(redisKey, ATTEMPT_WINDOW_SECONDS)
     ttl = ATTEMPT_WINDOW_SECONDS
+  } else if (ttl === -2) {
+    // The counter expired between INCR and TTL: the window is already over.
+    ttl = 1
   }
   return { allowed: count <= limit, retryAfterSeconds: Math.max(1, ttl) }
 }
@@ -65,8 +68,11 @@ export async function consumeDashboardLoginAttempt(
   return consumeDashboardAttempt(`dashboard:login:${bucket}:${key}`, LOGIN_ATTEMPT_LIMITS[bucket])
 }
 
-export async function consumeDashboardInvitationAttempt(key: string): Promise<DashboardAttemptResult> {
-  return consumeDashboardAttempt(`dashboard:invitation:${key}`, INVITATION_ATTEMPT_LIMIT)
+export async function consumeDashboardInvitationAttempt(
+  key: string,
+  limit = INVITATION_ATTEMPT_LIMIT,
+): Promise<DashboardAttemptResult> {
+  return consumeDashboardAttempt(`dashboard:invitation:${key}`, limit)
 }
 
 export async function clearDashboardLoginAttempts(

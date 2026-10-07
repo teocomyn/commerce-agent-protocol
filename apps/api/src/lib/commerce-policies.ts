@@ -50,12 +50,15 @@ const MAX_MERCHANT_CLAIM_LENGTH = 100
 // Accepts list metafields (JSON arrays) and comma-separated text metafields.
 export function parseMetafieldList(value: string | undefined): string[] {
   if (!value) return []
-  let items: unknown[] = value.split(',')
+  let items: unknown[]
   try {
     const parsed = JSON.parse(value) as unknown
-    if (Array.isArray(parsed)) items = parsed
+    // json metafields: an array of strings or a single string; objects and
+    // other JSON values are not a list of claims and are ignored.
+    items = Array.isArray(parsed) ? parsed : typeof parsed === 'string' ? [parsed] : []
   } catch {
     // Plain comma-separated text.
+    items = value.split(',')
   }
   return [...new Set(items
     .filter((item): item is string => typeof item === 'string')

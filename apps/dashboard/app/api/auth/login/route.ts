@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
 
   // Two independent buckets (limits in lib/redis.ts); either one being
   // exhausted rejects the attempt:
-  // - per client address, taken from X-Forwarded-For (see clientAddress());
+  // - per client address, the rightmost X-Forwarded-For hop (see clientAddress());
   // - per account, sha256(email:shop). It does not depend on X-Forwarded-For,
   //   so rotating or forging addresses cannot multiply guesses on one account.
   const addressKey = sha256(clientAddress(req))

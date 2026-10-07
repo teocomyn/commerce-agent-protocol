@@ -38,6 +38,13 @@ paths:
       tags: [search]
       summary: Search products
       operationId: searchProducts
+      description: >-
+        Returns products of the calling merchant only. Servers MUST only return
+        products the merchant currently offers for sale (for example Shopify
+        status ACTIVE; never drafts, archived, unpublished or unlisted
+        products), and `certifications` MUST come from data declared by the
+        merchant: servers MUST NOT infer or generate certifications, labels or
+        environmental claims.
       requestBody:
         required: true
         content:

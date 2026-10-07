@@ -4,15 +4,18 @@ import { prisma } from '@cap/db'
 import { getDashboardSession } from '@/lib/dashboard-session'
 import { hashInvitationToken, isInvitationTokenFormat } from '@/lib/human-auth'
 import AcceptInvitationForm from './AcceptInvitationForm'
+import SwitchAccountButton from './SwitchAccountButton'
 
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { referrer: 'no-referrer' }
 
-/** True when the current dashboard session belongs to the invited account. */
-async function isSignedInAsInvitee(token: string): Promise<boolean> {
-  if (!isInvitationTokenFormat(token)) return false
+type Viewer = 'invitee' | 'other-account' | 'anonymous'
+
+/** Whether the current dashboard session belongs to the invited account. */
+async function invitationViewer(token: string): Promise<Viewer> {
   const session = await getDashboardSession()
-  if (!session) return false
+  if (!session) return 'anonymous'
+  if (!isInvitationTokenFormat(token)) return 'other-account'
 
   const [invitation, user] = await Promise.all([
     prisma.merchantInvitation.findUnique({
@@ -30,11 +33,12 @@ async function isSignedInAsInvitee(token: string): Promise<boolean> {
       select: { email: true, passwordHash: true },
     }),
   ])
-  return Boolean(
+  const isInvitee = Boolean(
     invitation && !invitation.acceptedAt && !invitation.revokedAt &&
     invitation.expiresAt > new Date() && !invitation.merchant.uninstalledAt &&
     user?.passwordHash && user.email === invitation.email,
   )
+  return isInvitee ? 'invitee' : 'other-account'
 }
 
 export default async function AcceptInvitationPage({
@@ -43,7 +47,8 @@ export default async function AcceptInvitationPage({
   params: Promise<{ token: string }>
 }) {
   const { token } = await params
-  const signedInAsInvitee = await isSignedInAsInvitee(token)
+  const viewer = await invitationViewer(token)
+  const signedInAsInvitee = viewer === 'invitee'
 
   return (
     <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24 }}>
@@ -58,11 +63,18 @@ export default async function AcceptInvitationPage({
             : 'Create your account to access this merchant’s CAP dashboard. The invitation can only be used once.'}
         </p>
         <AcceptInvitationForm token={token} signedInAsInvitee={signedInAsInvitee} />
-        {!signedInAsInvitee && (
+        {viewer === 'anonymous' && (
           <p style={{ margin: '20px 0 0', color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6 }}>
             Already have an account?{' '}
             <Link href="/login" style={{ color: 'var(--accent)' }}>Sign in</Link>
             {' '}first, then reopen this link.
+          </p>
+        )}
+        {viewer === 'other-account' && (
+          <p style={{ margin: '20px 0 0', color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6 }}>
+            You are signed in with a different account.{' '}
+            <SwitchAccountButton />
+            {' '}Then sign in as the invited account and reopen this link.
           </p>
         )}
       </div>

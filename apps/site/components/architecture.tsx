@@ -58,13 +58,10 @@ export function Architecture() {
         ">
           {/* Desktop: horizontal flow */}
           <div className="hidden md:flex items-center justify-between gap-2">
-            <div className="flex flex-col gap-3">
-              <FlowNode label="SHOPIFY" sub="supported today" />
-              <FlowNode label="OTHER PLATFORMS" sub="open to contributions" />
-            </div>
+            <FlowNode label="SHOPIFY" sub="only platform today" />
             <FlowArrow label="OAuth" />
             <FlowNode label="CAP" sub="protocol + infra" variant="primary" />
-            <FlowArrow label="API key" />
+            <FlowArrow label="REST: API key" />
             <div className="flex flex-col gap-3">
               <FlowNode label="CLAUDE DESKTOP" sub="mcp stdio" variant="pulse" />
               <FlowNode label="CURSOR" sub="mcp stdio" variant="pulse" />

@@ -45,8 +45,9 @@ describe('dashboard API route helpers', () => {
     },
   )
 
-  it('takes the client address from the first X-Forwarded-For hop', () => {
-    expect(clientAddress(jsonRequest('{}', { 'x-forwarded-for': ' 203.0.113.7 , 10.0.0.1' }))).toBe('203.0.113.7')
+  it('takes the client address from the proxy-appended (rightmost) X-Forwarded-For hop', () => {
+    // A client can prepend any value; Render's proxy appends the address it saw.
+    expect(clientAddress(jsonRequest('{}', { 'x-forwarded-for': ' 198.51.100.9 , 203.0.113.7 ' }))).toBe('203.0.113.7')
     expect(clientAddress(jsonRequest('{}', { 'x-forwarded-for': '' }))).toBe('unknown')
     expect(clientAddress(jsonRequest('{}'))).toBe('unknown')
   })

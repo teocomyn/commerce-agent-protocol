@@ -55,12 +55,15 @@ export async function cacheDel(key: string): Promise<void> {
 // instead of scanning the whole keyspace (BullMQ keys included) on each
 // webhook; old entries simply expire with their TTL.
 const searchGenerationKey = (merchantId: string) => `search:gen:${merchantId}`
+// Bump when the search response shape or visibility rules change, so entries
+// cached by an older release are never served after a deploy.
+const SEARCH_CACHE_VERSION = 'v3'
 
 export async function searchCacheKey(merchantId: string, request: unknown): Promise<string | null> {
   try {
     const generation = (await redis.get(searchGenerationKey(merchantId))) ?? '0'
     const digest = crypto.createHash('sha256').update(JSON.stringify(request)).digest('hex')
-    return `search:${merchantId}:${generation}:${digest}`
+    return `search:${merchantId}:${SEARCH_CACHE_VERSION}:${generation}:${digest}`
   } catch {
     return null
   }

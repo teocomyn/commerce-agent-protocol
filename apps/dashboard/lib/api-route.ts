@@ -54,13 +54,6 @@ export async function requireDashboardSession(
   return { ok: true, value: session }
 }
 
-/**
- * Client address used for per-address rate limits: the first X-Forwarded-For
- * hop. It is only as trustworthy as the reverse proxy in front of the
- * dashboard; when the proxy appends to a client-supplied header instead of
- * replacing it, clients can choose this value. Limits that must hold against
- * a distributed or spoofing client therefore also key on something else.
- */
-export function clientAddress(req: Request): string {
-  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
-}
+// Single implementation (rightmost X-Forwarded-For hop) lives next to the
+// other request-trust helpers.
+export { clientAddress } from './dashboard-session'

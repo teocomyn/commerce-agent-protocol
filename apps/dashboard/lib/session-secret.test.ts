@@ -37,10 +37,19 @@ describe('dashboard session secret validation', () => {
     expect(() => validateDashboardSessionSecret(secret)).toThrow(/openssl rand -hex 32/)
   })
 
+  it.each([
+    'a'.repeat(32),
+    '12345678901234567890123456789012',
+    'f'.repeat(64),
+  ])('rejects trivially guessable secret %s', (secret) => {
+    expect(() => validateDashboardSessionSecret(secret)).toThrow(/trivially guessable/)
+  })
+
   it('reads the secret from DASHBOARD_SESSION_SECRET', () => {
     process.env.DASHBOARD_SESSION_SECRET = 'change_me_to_a_random_secret_of_at_least_32_chars'
     expect(() => dashboardSessionSecret()).toThrow(/placeholder/)
-    process.env.DASHBOARD_SESSION_SECRET = 'f'.repeat(64)
-    expect(dashboardSessionSecret()).toBe('f'.repeat(64))
+    const secret = 'a3f1c9e04b7d2a6f8e1c3b5d7f9a0c2e4b6d8f0a1c3e5a7b9d1f3a5c7e9b0d2f'
+    process.env.DASHBOARD_SESSION_SECRET = secret
+    expect(dashboardSessionSecret()).toBe(secret)
   })
 })

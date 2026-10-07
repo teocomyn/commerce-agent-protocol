@@ -7,7 +7,7 @@ import {
   verifyDashboardSessionToken,
 } from './dashboard-session'
 
-const SECRET = '12345678901234567890123456789012'
+const SECRET = '9f2c7a1e5b3d8f4a6c0e2b7d9f1a3c5e'
 const MEMBERSHIP_UPDATED_AT = new Date('2026-10-07T12:00:00.123Z')
 const MV = MEMBERSHIP_UPDATED_AT.getTime()
 

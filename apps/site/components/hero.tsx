@@ -66,7 +66,7 @@ export function Hero() {
         >
           Open spec and reference implementation between Shopify catalogs and AI agents.{' '}
           <br className="hidden md:block" />
-          Agents find products and build the cart. The shopper pays on Shopify.
+          Agents find a product and start its checkout. The shopper pays on Shopify.
         </p>
 
         <div

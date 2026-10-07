@@ -451,7 +451,7 @@ app.notFound((c) => c.json<CAPError>({
 
 const port = parseInt(process.env.PORT ?? process.env.API_PORT ?? '3000')
 
-assertRuntimeSecrets()
+assertRuntimeSecrets(process.env, { mode: process.env.MCP_MODE === 'true' ? 'mcp' : 'http' })
 
 // Only start HTTP server if not in MCP mode
 if (process.env.MCP_MODE !== 'true') {

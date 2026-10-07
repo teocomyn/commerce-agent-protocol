@@ -62,6 +62,12 @@ Processes run `node` directly as PID 1 and handle `SIGTERM`: the API stops accep
 
 If Redis becomes unavailable, API commands fail after about two seconds instead of hanging: authentication falls back to Postgres, the search cache is bypassed, and per-key rate limiting fails open (logged) while `/ready` reports the outage.
 
+## Full catalog resync
+
+`POST /internal/operations/catalog-sync` with `{"confirm":true}` queues a full catalog sync for every active install and returns the number of queued shops. Use it after a release that changes stored product data. It calls Shopify for every product and OpenAI for every product whose content changed, so run it once, not on a schedule.
+
+A full sync now reads every product, active or not, so a product that became a draft or was archived while its webhook was missed is hidden on the next sync.
+
 ## Dead-letter inspection and replay
 
 List at most 100 recent entries:

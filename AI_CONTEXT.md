@@ -23,7 +23,7 @@ Prototype / unrelated standalone product. No paying user, no adopter, no product
 
 ## Infrastructure
 
-- Planned: Render blueprints `render.yaml` (production) and `render.staging.yaml` (Frankfurt; Postgres, Key Value, API, 2 workers, dashboard). As of 2026-10-07 the custom domains `api.`, `api-staging.` and `dashboard.cap-protocol.org` do not resolve: nothing is deployed on Render under those domains.
+- Planned: Render blueprints `render.yaml` (production) and `render.staging.yaml` (Frankfurt; Postgres, Key Value, API, 2 workers, dashboard). As of 2026-10-07 the custom domains `api.`, `api-staging.` and `dashboard.cap-protocol.org` do not resolve. Whether Render services exist without those domains is unknown: the Render account was not inspected.
 - Vercel project `commerce-agent-protocol-site` (team "T4C2's projects") serves `commerce-agent-protocol-site.vercel.app`; Dependabot branches create preview deployments.
 - `cap-protocol.org` currently serves another site through Cloudflare (see `docs/PRODUCTION_DEPLOYMENT.md`).
 - Secrets live only in provider dashboards and the git-ignored `.env` (`apps/dashboard/.env` is a symlink to it).
