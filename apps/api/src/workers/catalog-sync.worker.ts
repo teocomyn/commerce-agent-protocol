@@ -86,8 +86,32 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
       totalPages++
       await job.log(`Fetched page ${totalPages}: ${products.length} products`)
 
-      // Enqueue each product for enrichment
-      const enrichmentJobs = products.map((product) => ({
+      // Every status is read so a product that became a draft or was archived
+      // while its webhook was missed gets hidden. Inactive products only need
+      // their stored status updated: no enrichment fetch, no inventory jobs.
+      const activeProducts = products.filter((product) => product.status === 'active')
+      const inactiveProducts = products.filter((product) => product.status !== 'active')
+      if (inactiveProducts.length > 0) {
+        await prisma.$transaction(inactiveProducts.map((product) => {
+          // Same freshness rule as the enrichment pipeline: a page read before
+          // a newer webhook was applied must not overwrite that state.
+          const shopifyUpdatedAt = new Date(product.updated_at)
+          const fresh = !Number.isNaN(shopifyUpdatedAt.getTime())
+          return prisma.productRaw.updateMany({
+            where: {
+              merchantId,
+              shopifyId: BigInt(product.id),
+              status: { not: product.status },
+              ...(fresh && { OR: [{ shopifyUpdatedAt: null }, { shopifyUpdatedAt: { lte: shopifyUpdatedAt } }] }),
+            },
+            data: { status: product.status, syncedAt: new Date(), ...(fresh && { shopifyUpdatedAt }) },
+          })
+        }))
+        await invalidateMerchantSearchCache(merchantId)
+      }
+
+      // Enqueue each active product for enrichment
+      const enrichmentJobs = activeProducts.map((product) => ({
         name: 'enrich-product',
         data: {
           shopDomain,

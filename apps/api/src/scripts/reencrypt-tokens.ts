@@ -10,26 +10,53 @@ assertRuntimeSecrets(process.env, { mode: 'mcp' })
 
 const TOKEN_FIELDS = ['shopifyToken', 'shopifyRefreshToken', 'storefrontToken'] as const
 
-const merchants = await prisma.merchant.findMany({
-  select: { id: true, shopifyDomain: true, shopifyToken: true, shopifyRefreshToken: true, storefrontToken: true },
-})
+const selectTokens = {
+  id: true, shopifyDomain: true, shopifyToken: true, shopifyRefreshToken: true, storefrontToken: true,
+} as const
+const merchants = await prisma.merchant.findMany({ select: selectTokens })
+
+const MAX_ATTEMPTS = 3
 
 let reencrypted = 0
 const failures: string[] = []
-for (const merchant of merchants) {
-  const data: Partial<Record<(typeof TOKEN_FIELDS)[number], string>> = {}
-  try {
-    for (const field of TOKEN_FIELDS) {
-      const ciphertext = merchant[field]
-      if (ciphertext) data[field] = encryptToken(decryptToken(ciphertext))
+for (const listed of merchants) {
+  // Compare-and-set: the write only applies if no token changed since it was
+  // read (refresh, reinstall, uninstall); otherwise the row is re-read and
+  // retried, so a stale credential is never written back.
+  let merchant: typeof listed | null = listed
+  let attempts = 0
+  while (merchant) {
+    const current: typeof listed = merchant
+    const data: Partial<Record<(typeof TOKEN_FIELDS)[number], string>> = {}
+    try {
+      for (const field of TOKEN_FIELDS) {
+        const ciphertext = current[field]
+        if (ciphertext) data[field] = encryptToken(decryptToken(ciphertext))
+      }
+    } catch (error) {
+      failures.push(`${current.shopifyDomain}: ${error instanceof Error ? error.message : String(error)}`)
+      break
     }
-  } catch (error) {
-    failures.push(`${merchant.shopifyDomain}: ${error instanceof Error ? error.message : String(error)}`)
-    continue
+    if (Object.keys(data).length === 0) break
+    const { count } = await prisma.merchant.updateMany({
+      where: {
+        id: current.id,
+        shopifyToken: current.shopifyToken,
+        shopifyRefreshToken: current.shopifyRefreshToken,
+        storefrontToken: current.storefrontToken,
+      },
+      data,
+    })
+    if (count === 1) {
+      reencrypted++
+      break
+    }
+    if (++attempts >= MAX_ATTEMPTS) {
+      failures.push(`${current.shopifyDomain}: tokens kept changing during re-encryption, run the script again`)
+      break
+    }
+    merchant = await prisma.merchant.findUnique({ where: { id: current.id }, select: selectTokens })
   }
-  if (Object.keys(data).length === 0) continue
-  await prisma.merchant.update({ where: { id: merchant.id }, data })
-  reencrypted++
 }
 
 console.log(`[Reencrypt] ${reencrypted} merchant(s) re-encrypted, ${failures.length} failure(s)`)

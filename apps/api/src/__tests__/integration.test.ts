@@ -811,6 +811,7 @@ describe.sequential('CAP integration boundaries', () => {
 
   it('queues a full catalog sync for every active install on confirmation', async () => {
     process.env.CAP_OPERATIONS_TOKEN = 'integration-operations-secret-at-least-32-chars'
+    const startedAt = Date.now()
     try {
       const request = (body: unknown) => operationsRouter.request('/catalog-sync', {
         method: 'POST',
@@ -827,8 +828,18 @@ describe.sequential('CAP integration boundaries', () => {
       expect(queued).toBeGreaterThanOrEqual(1)
       const jobs = await catalogSyncQueue.getJobs(['waiting', 'prioritized', 'delayed'])
       expect(jobs.some((job) => job.id?.startsWith(`operations-resync-${merchantA}-`))).toBe(true)
+
+      // A second confirmation while those jobs wait does not queue them twice.
+      expect((await request({ confirm: true })).status).toBe(200)
+      const afterRetry = await catalogSyncQueue.getJobs(['waiting', 'prioritized', 'delayed'])
+      expect(afterRetry.filter((job) => job.id?.startsWith(`operations-resync-${merchantA}-`))).toHaveLength(1)
     } finally {
       delete process.env.CAP_OPERATIONS_TOKEN
+      // The fake stores must never reach a running catalog worker.
+      const queued = await catalogSyncQueue.getJobs(['waiting', 'prioritized', 'delayed'])
+      await Promise.all(queued
+        .filter((job) => job.id?.startsWith('operations-resync-') && job.timestamp >= startedAt)
+        .map((job) => job.remove()))
     }
   })
 

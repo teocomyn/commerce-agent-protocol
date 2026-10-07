@@ -205,6 +205,10 @@ checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async
     resolvedAgentQueryId = aq?.id ?? null
   }
 
+  // Decrypted before the row exists: an unreadable token (key rotation
+  // mistake) fails the request without leaving the Idempotency-Key pending.
+  const storefrontToken = decryptToken(product.merchant.storefrontToken)
+
   // Persist before the upstream call. The opaque token is copied into Shopify
   // cart attributes and later returned on the order webhook.
   const trackingToken = crypto.randomBytes(32).toString('hex')
@@ -239,7 +243,6 @@ checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async
   }
 
   // 4. Create the Shopify Cart (replaces deprecated checkoutCreate)
-  const storefrontToken = decryptToken(product.merchant.storefrontToken)
   let cart
   try {
     cart = await createShopifyCart(product.merchant.shopifyDomain, storefrontToken, {

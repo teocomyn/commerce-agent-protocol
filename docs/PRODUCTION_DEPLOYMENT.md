@@ -20,7 +20,8 @@ To rotate the encryption key (or to move an older string-format key to the requi
 2. Set the old value in `ENCRYPTION_KEY_PREVIOUS` on `cap-api` **and** on both worker services: the blueprint does not define this variable, so the workers do not inherit it.
 3. Deploy. Stored tokens stay readable through the previous key.
 4. Re-encrypt every stored token with the new key from a `cap-api` shell: `node apps/api/dist/apps/api/src/scripts/reencrypt-tokens.js` (locally: `pnpm --filter @cap/api reencrypt-tokens`). Token refreshes only re-encrypt admin tokens; storefront tokens are re-encrypted by this script or by a reinstall.
-5. Remove `ENCRYPTION_KEY_PREVIOUS` from all three services once the script reports zero failures.
+5. If the script reports failures, it names each shop. A token that neither key can decrypt is unusable anyway: reinstall the app on that shop (which stores fresh tokens), or, for a shop that no longer uses CAP, clear its `shopify_token`, `shopify_refresh_token` and `storefront_token` columns and set `uninstalled_at` to the current time. Then run the script again.
+6. Remove `ENCRYPTION_KEY_PREVIOUS` from all three services once the script reports zero failures.
 
 The dashboard image needs `NEXT_PUBLIC_API_URL` at build time: Render passes service environment variables as Docker build args, and `Dockerfile.dashboard` fails the build if it is missing.
 

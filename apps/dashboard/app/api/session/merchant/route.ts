@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { prisma } from '@cap/db'
 import {
   createDashboardSessionToken,
+  dashboardPublicOrigin,
   dashboardSessionCookie,
   isSameOriginMutation,
   membershipVersion,
@@ -22,7 +23,9 @@ import {
  */
 export async function GET(req: NextRequest) {
   const rawToken = req.nextUrl.searchParams.get('token') ?? ''
-  const response = NextResponse.redirect(new URL('/session/confirm', req.url), 303)
+  // Public origin, not req.url: behind the proxy req.url is http, and the
+  // browser would not send the Secure handoff cookie to the next page.
+  const response = NextResponse.redirect(new URL('/session/confirm', dashboardPublicOrigin(req)), 303)
   if (isOwnerLoginTokenFormat(rawToken)) {
     response.cookies.set(OWNER_LOGIN_COOKIE, rawToken, ownerLoginCookieOptions())
   } else {
@@ -39,11 +42,20 @@ export async function POST(req: NextRequest) {
   }
   // The sign-in token travels in the HttpOnly handoff cookie, not in the body.
   const rawToken = req.cookies.get(OWNER_LOGIN_COOKIE)?.value ?? ''
+  const body = await req.json().catch(() => null) as { merchantId?: unknown } | null
 
   const now = new Date()
   const loginToken = await findPendingOwnerLoginToken(rawToken, now)
   if (!loginToken) {
     return NextResponse.json({ error: 'Invalid or expired login token' }, { status: 401 })
+  }
+  // Another Shopify connection in this browser may have replaced the handoff
+  // cookie since the page was rendered: never sign in to a store other than
+  // the one the owner just confirmed.
+  if (body?.merchantId !== loginToken.merchantId) {
+    return NextResponse.json({
+      error: 'Another store was connected in this browser. Reload this page to confirm that store.',
+    }, { status: 409 })
   }
 
   const membership = await prisma.merchantMember.findUnique({
