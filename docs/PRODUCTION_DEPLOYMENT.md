@@ -12,7 +12,11 @@ The root `render.yaml` provisions the four processes in Frankfurt, plus a privat
 
 The root domain currently serves a different product titled “CLI Agent Protocol”. Confirm that this site can be replaced before moving the root DNS record; the API and dashboard subdomains can be added independently without that cutover.
 
-Before the first Blueprint sync, provide the six secrets marked `sync: false`: `OPENAI_API_KEY`, `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_SCOPES`, `ENCRYPTION_KEY`, and `CAP_OPERATIONS_TOKEN`. The operations token must be random, at least 32 characters, and distinct from merchant API keys and staging. Do not copy a development encryption key after production tokens have already been encrypted: rotation requires re-encrypting stored tokens.
+Before the first Blueprint sync, provide the six secrets marked `sync: false`: `OPENAI_API_KEY`, `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_SCOPES`, `ENCRYPTION_KEY`, and `CAP_OPERATIONS_TOKEN`. The operations token must be random, at least 32 characters, and distinct from merchant API keys and staging. In production, `ENCRYPTION_KEY` must be 64 hex characters (`openssl rand -hex 32`) or base64 of 32 bytes: the API and workers refuse to start otherwise, and they refuse any `.env.example` value. Do not copy a development encryption key after production tokens have already been encrypted.
+
+To rotate the encryption key (or to move an older string-format key to the required format), set the new value in `ENCRYPTION_KEY` and the old one in `ENCRYPTION_KEY_PREVIOUS` on `cap-api` (the workers inherit both). Stored tokens stay readable and are re-encrypted with the new key on the next token refresh or reinstall. Remove `ENCRYPTION_KEY_PREVIOUS` only once every merchant has been re-encrypted.
+
+The dashboard image needs `NEXT_PUBLIC_API_URL` at build time: Render passes service environment variables as Docker build args, and `Dockerfile.dashboard` fails the build if it is missing.
 
 The API pre-deploy hook runs `prisma migrate deploy`; the initial migration enables `vector`. Render Postgres 16 supports pgvector. Deploys are gated on successful GitHub checks.
 

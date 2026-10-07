@@ -37,6 +37,7 @@ docker compose up -d
 # Env
 cp .env.example .env
 # At minimum: DATABASE_URL, REDIS_URL, OPENAI_API_KEY, ENCRYPTION_KEY
+# (`openssl rand -hex 32`; example values are rejected at boot)
 
 # Install + DB
 pnpm install
@@ -80,6 +81,7 @@ pnpm --filter=@cap/api exec tsx watch src/workers/catalog-sync.worker.ts
 - **No new dependencies** without justification in the PR description.
 - **No comments that restate code.** Comments should explain *why*, not *what*.
 - **Database access** goes through Prisma. Raw SQL is allowed for vector queries (pgvector is not natively supported by Prisma) — always use bound parameters, never string concatenation.
+- **Schema changes** always ship as a migration in `packages/db/prisma/migrations/`, and `schema.prisma` must describe the same database. CI runs `pnpm db:check-drift` against a freshly migrated database. There is intentionally no `db:push` script: it bypasses migrations and would drop the pgvector index, which Prisma cannot describe.
 - **Secrets** never in code or fixtures. Use `.env`, document in `.env.example`.
 
 ## Protocol changes
