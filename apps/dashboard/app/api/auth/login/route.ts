@@ -4,6 +4,7 @@ import { prisma } from '@cap/db'
 import {
   createDashboardSessionToken,
   dashboardSessionCookie,
+  clientAddress,
   isSameOriginMutation,
 } from '@/lib/dashboard-session'
 import { normalizeEmail, verifyHumanPassword } from '@/lib/human-auth'
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
   }
 
-  const source = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+  const source = clientAddress(req)
   const attemptKey = crypto.createHash('sha256').update(`${source}:${email}:${shop}`).digest('hex')
   const rateLimit = await consumeDashboardLoginAttempt(attemptKey)
   if (!rateLimit.allowed) {

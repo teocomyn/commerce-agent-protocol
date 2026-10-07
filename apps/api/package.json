@@ -12,6 +12,7 @@
     "dev:workers": "concurrently -n enrich,sync -c cyan,magenta \"pnpm run dev:worker:enrichment\" \"pnpm run dev:worker:catalog\"",
     "mcp": "tsx --env-file=../../.env src/mcp/stdio.ts",
     "seed": "tsx --env-file=../../.env src/scripts/seed.ts",
+    "reencrypt-tokens": "tsx --env-file-if-exists=../../.env src/scripts/reencrypt-tokens.ts",
     "build": "tsc && tsc-alias",
     "start": "node --env-file-if-exists=../../.env dist/apps/api/src/index.js",
     "start:worker:enrichment": "node --env-file-if-exists=../../.env dist/apps/api/src/workers/enrichment.worker.js",

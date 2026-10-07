@@ -12,6 +12,7 @@ const openai = new OpenAI({
   maxRetries: 2,
 })
 const searchRouter = new Hono()
+const SEARCH_CACHE_VERSION = 'v2'
 
 function detectAgentType(userAgent: string): string {
   const ua = userAgent.toLowerCase()
@@ -68,7 +69,9 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
   const searchId = `srch_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`
 
   // Cache is scoped per-merchant to honor the multi-tenant filter
-  const cacheKey = `search:${auth.merchantId}:${JSON.stringify({ query, filters, limit, sort })}`
+  // The version segment retires entries cached by older releases, whose
+  // responses may contain inactive products or removed fields.
+  const cacheKey = `search:${auth.merchantId}:${SEARCH_CACHE_VERSION}:${JSON.stringify({ query, filters, limit, sort })}`
   const cached = await cacheGet<SearchResponse>(cacheKey)
   if (cached) {
     const latency = Date.now() - startTime

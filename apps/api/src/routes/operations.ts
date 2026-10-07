@@ -110,6 +110,32 @@ operationsRouter.post('/dead-letter/:id/replay', async (c) => {
   })
 })
 
+// Queues a full catalog sync for every active install, e.g. after a release
+// that changes how products are stored (merchant claims, statuses). Calls
+// Shopify and may call OpenAI for every product whose content changed.
+operationsRouter.post('/catalog-sync', async (c) => {
+  const body = await c.req.json().catch(() => null) as { confirm?: boolean } | null
+  if (body?.confirm !== true) {
+    return c.json({
+      error: {
+        code: 'CATALOG_SYNC_CONFIRMATION_REQUIRED',
+        message: 'Set confirm=true to queue a full catalog sync for every active install',
+      },
+    }, 400)
+  }
+  const merchants = await prisma.merchant.findMany({
+    where: { uninstalledAt: null, shopifyToken: { not: null } },
+    select: { id: true, shopifyDomain: true },
+  })
+  const requestedAt = Date.now()
+  await catalogSyncQueue.addBulk(merchants.map((merchant) => ({
+    name: 'full-catalog-sync',
+    data: { merchantId: merchant.id, shopDomain: merchant.shopifyDomain },
+    opts: { jobId: `operations-resync-${merchant.id}-${requestedAt}` },
+  })))
+  return c.json({ queued: merchants.length })
+})
+
 operationsRouter.get('/metrics', async (c) => {
   const [queues, webhookStatuses, activeMerchants] = await Promise.all([
     getQueueStats(),

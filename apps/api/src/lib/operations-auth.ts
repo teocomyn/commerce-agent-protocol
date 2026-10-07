@@ -3,7 +3,7 @@ import { isPlaceholderSecret } from './secrets.js'
 
 export function operationsTokenConfigured(): boolean {
   const configured = process.env.CAP_OPERATIONS_TOKEN ?? ''
-  return configured.length >= 32 && !isPlaceholderSecret(configured)
+  return configured.length >= 32 && !isPlaceholderSecret(configured) && new Set(configured).size >= 12
 }
 
 export function verifyOperationsToken(provided: string | undefined): boolean {

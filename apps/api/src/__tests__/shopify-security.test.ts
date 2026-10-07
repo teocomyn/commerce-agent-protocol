@@ -79,6 +79,7 @@ describe('Shopify security helpers', () => {
   })
 
   it('reads tokens encrypted with the previous key during rotation', () => {
+    const originalPrevious = process.env.ENCRYPTION_KEY_PREVIOUS
     process.env.ENCRYPTION_KEY = 'c3'.repeat(32)
     const beforeRotation = encryptToken('rotated-token')
     process.env.ENCRYPTION_KEY_PREVIOUS = process.env.ENCRYPTION_KEY
@@ -86,7 +87,22 @@ describe('Shopify security helpers', () => {
     try {
       expect(decryptToken(beforeRotation)).toBe('rotated-token')
     } finally {
-      delete process.env.ENCRYPTION_KEY_PREVIOUS
+      if (originalPrevious === undefined) delete process.env.ENCRYPTION_KEY_PREVIOUS
+      else process.env.ENCRYPTION_KEY_PREVIOUS = originalPrevious
+      process.env.ENCRYPTION_KEY = '12345678901234567890123456789012'
+    }
+  })
+
+  it('never lets an unusable previous key block the current key', () => {
+    const originalPrevious = process.env.ENCRYPTION_KEY_PREVIOUS
+    process.env.ENCRYPTION_KEY = 'e5'.repeat(32)
+    const token = encryptToken('current-token')
+    process.env.ENCRYPTION_KEY_PREVIOUS = 'short'
+    try {
+      expect(decryptToken(token)).toBe('current-token')
+    } finally {
+      if (originalPrevious === undefined) delete process.env.ENCRYPTION_KEY_PREVIOUS
+      else process.env.ENCRYPTION_KEY_PREVIOUS = originalPrevious
       process.env.ENCRYPTION_KEY = '12345678901234567890123456789012'
     }
   })

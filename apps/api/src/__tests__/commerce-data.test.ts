@@ -109,5 +109,7 @@ describe('merchant-declared claims', () => {
     expect(parseMetafieldList('[1, "Fair Trade", null]')).toEqual(['Fair Trade'])
     expect(parseMetafieldList(Array.from({ length: 30 }, (_, i) => `C${i}`).join(','))).toHaveLength(20)
     expect(parseMetafieldList(undefined)).toEqual([])
+    expect(parseMetafieldList('"GOTS"')).toEqual(['GOTS'])
+    expect(parseMetafieldList('{"label":"GOTS"}')).toEqual([])
   })
 })

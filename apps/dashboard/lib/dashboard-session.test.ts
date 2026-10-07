@@ -6,7 +6,7 @@ import {
 
 describe('signed dashboard sessions', () => {
   beforeEach(() => {
-    process.env.DASHBOARD_SESSION_SECRET = '12345678901234567890123456789012'
+    process.env.DASHBOARD_SESSION_SECRET = '9f2c7a1e5b3d8f4a6c0e2b7d9f1a3c5e'
   })
 
   it('round-trips a valid signed session', () => {

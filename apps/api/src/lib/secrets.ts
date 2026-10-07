@@ -24,15 +24,35 @@ export function decodeCanonicalKey(raw: string): Buffer | null {
   return null
 }
 
+// Random output of `openssl rand -hex 32` has 16 distinct characters, base64
+// even more; '1234…' or 'a'.repeat(32) is not a secret.
+const MIN_DISTINCT_CHARACTERS = 12
+
+function isTriviallyGuessable(value: string): boolean {
+  return new Set(value).size < MIN_DISTINCT_CHARACTERS
+}
+
 let legacyKeyWarningShown = false
+
+export interface RuntimeSecretOptions {
+  /**
+   * `mcp`: the stdio MCP server never serves HTTP, so the Shopify app secret
+   * and the operations token are not required there.
+   */
+  mode?: 'http' | 'mcp' | 'worker'
+}
 
 /**
  * Fails fast at process start instead of on the first OAuth or checkout.
  * Production requires a canonical 32-byte encryption key; other environments
  * accept the legacy "32+ character string" format with a warning.
  */
-export function assertRuntimeSecrets(env: NodeJS.ProcessEnv = process.env): void {
+export function assertRuntimeSecrets(
+  env: NodeJS.ProcessEnv = process.env,
+  options: RuntimeSecretOptions = {},
+): void {
   const production = env['NODE_ENV'] === 'production'
+  const mode = options.mode ?? 'http'
   const errors: string[] = []
 
   const encryptionKey = env['ENCRYPTION_KEY'] ?? ''
@@ -43,6 +63,8 @@ export function assertRuntimeSecrets(env: NodeJS.ProcessEnv = process.env): void
   } else if (!decodeCanonicalKey(encryptionKey)) {
     if (Buffer.byteLength(encryptionKey, 'utf8') < 32) {
       errors.push('ENCRYPTION_KEY must contain at least 32 bytes. Generate one with `openssl rand -hex 32`.')
+    } else if (isTriviallyGuessable(encryptionKey)) {
+      errors.push('ENCRYPTION_KEY is trivially guessable. Generate one with `openssl rand -hex 32`.')
     } else if (production) {
       errors.push(
         'ENCRYPTION_KEY must be 64 hex characters or base64 of 32 bytes in production. ' +
@@ -54,19 +76,28 @@ export function assertRuntimeSecrets(env: NodeJS.ProcessEnv = process.env): void
     }
   }
 
+  // Validated as strictly as the current key: an unusable previous key would
+  // otherwise only fail on the first decryption.
   const previousKey = env['ENCRYPTION_KEY_PREVIOUS']
-  if (previousKey && isPlaceholderSecret(previousKey)) {
-    errors.push('ENCRYPTION_KEY_PREVIOUS contains an example value.')
+  if (previousKey && (
+    isPlaceholderSecret(previousKey) ||
+    (!decodeCanonicalKey(previousKey) && Buffer.byteLength(previousKey, 'utf8') < 32)
+  )) {
+    errors.push('ENCRYPTION_KEY_PREVIOUS must be the previous 32-byte key (not an example or shorter value).')
   }
 
-  const operationsToken = env['CAP_OPERATIONS_TOKEN']
-  if (operationsToken && (operationsToken.length < 32 || isPlaceholderSecret(operationsToken))) {
-    errors.push('CAP_OPERATIONS_TOKEN must be a random value of at least 32 characters (`openssl rand -hex 32`).')
-  }
+  if (mode !== 'mcp') {
+    const operationsToken = env['CAP_OPERATIONS_TOKEN']
+    if (operationsToken && (
+      operationsToken.length < 32 || isPlaceholderSecret(operationsToken) || isTriviallyGuessable(operationsToken)
+    )) {
+      errors.push('CAP_OPERATIONS_TOKEN must be a random value of at least 32 characters (`openssl rand -hex 32`).')
+    }
 
-  const shopifySecret = env['SHOPIFY_API_SECRET']
-  if (production && (!shopifySecret || isPlaceholderSecret(shopifySecret))) {
-    errors.push('SHOPIFY_API_SECRET must be set to the Shopify app secret in production.')
+    const shopifySecret = env['SHOPIFY_API_SECRET']?.trim()
+    if (production && (!shopifySecret || isPlaceholderSecret(shopifySecret))) {
+      errors.push('SHOPIFY_API_SECRET must be set to the Shopify app secret in production.')
+    }
   }
 
   if (errors.length > 0) {

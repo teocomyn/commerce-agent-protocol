@@ -60,19 +60,38 @@ export const LLM_ENRICHMENT_JSON_SCHEMA = {
   additionalProperties: false,
 }
 
+// Shopper-visible fields must not carry certification, label or environmental
+// claims: those come only from merchant metafields. Anything the model emits
+// that looks like one is dropped, whatever the prompt said.
+const CLAIM_PATTERN = /\b(certifi\w*|labell?ed|award\w*|eco[- ]?friendly|eco[- ]?responsible|sustainab\w*|carbon[- ]?(neutral|negative|free)|climate[- ]?(neutral|positive)|biodegradable|compostable|organic|fair[- ]?trade|b[- ]?corp|gots|oeko[- ]?tex|vegan|cruelty[- ]?free)\b/i
+
+export function isClaimLike(value: string | number | boolean): boolean {
+  return typeof value === 'string' && CLAIM_PATTERN.test(value)
+}
+
+// Object.fromEntries keeps the last duplicate; the first occurrence wins here
+// so a repeated name cannot silently replace an earlier, usually better, value.
+function firstEntries<V>(entries: Array<readonly [string, V]>): Record<string, V> {
+  const result: Record<string, V> = {}
+  for (const [key, value] of entries) {
+    if (key.length > 0 && !Object.hasOwn(result, key)) result[key] = value
+  }
+  return result
+}
+
 export function normalizeLlmEnrichment(output: z.infer<typeof LlmEnrichmentSchema>): EnrichmentOutput {
-  const specs = Object.fromEntries(output.specs
-    .map((spec) => [spec.name.trim(), spec.value] as const)
-    .filter(([name]) => name.length > 0))
+  const specs = firstEntries(output.specs
+    .filter((spec) => !isClaimLike(spec.name) && !isClaimLike(spec.value))
+    .map((spec) => [spec.name.trim(), spec.value] as const))
   const sizeGuide = output.size_guide && output.size_guide.length > 0
-    ? Object.fromEntries(output.size_guide.map((row) => [row.size, row.measurements]))
+    ? firstEntries(output.size_guide.map((row) => [row.size.trim(), row.measurements] as const))
     : undefined
   return EnrichmentOutputSchema.parse({
     category: output.category,
     subcategory: output.subcategory,
     specs,
-    use_cases: output.use_cases,
-    target_audience: output.target_audience,
+    use_cases: output.use_cases.filter((useCase) => !isClaimLike(useCase)),
+    target_audience: output.target_audience.filter((audience) => !isClaimLike(audience)),
     ...(output.care_info && { care_info: output.care_info }),
     ...(sizeGuide && { size_guide: sizeGuide }),
     summary: output.summary,

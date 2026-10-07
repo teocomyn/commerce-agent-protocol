@@ -7,7 +7,7 @@ import { applyInventorySnapshot } from '../lib/inventory.js'
 import { invalidateMerchantSearchCache } from '../lib/redis.js'
 import { assertRuntimeSecrets } from '../lib/secrets.js'
 
-assertRuntimeSecrets()
+assertRuntimeSecrets(process.env, { mode: 'worker' })
 
 export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
   'catalog-sync',

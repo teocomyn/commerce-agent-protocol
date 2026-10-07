@@ -10,9 +10,9 @@ The first owner connects through Shopify OAuth. The API callback creates the mer
 
 Because that redirect is cross-site, the dashboard cannot tell it apart from a login CSRF link planted by an attacker. Sign-in therefore takes an explicit same-origin confirmation:
 
-1. `GET /api/session/merchant` checks the token format and answers `303` to `/session/confirm?token=…`. It never consumes the token or sets a cookie.
-2. `/session/confirm` looks the token up without consuming it. An unknown, expired, consumed, or uninstalled token shows a generic "invalid or has expired" message. Otherwise the page asks "Continue as owner of `<shop>.myshopify.com`?".
-3. The button sends `POST /api/session/merchant` with the token. The route requires a same-origin `Origin`, consumes the token atomically, verifies the owner membership, sets the session cookie, and returns `{ "redirect": "/dashboard" }`.
+1. `GET /api/session/merchant` checks the token format, moves the token into a five-minute HttpOnly `cap_owner_login` cookie, and answers `303` to `/session/confirm`. It never consumes the token or creates a session, and the token does not stay in the confirmation URL or the browser history.
+2. `/session/confirm` reads the cookie and looks the token up without consuming it. An unknown, expired, consumed, or uninstalled token shows a generic "invalid or has expired" message. Otherwise the page asks "Continue as owner of `<shop>.myshopify.com`?".
+3. The button sends `POST /api/session/merchant`. The route requires a same-origin `Origin`, reads the token from the cookie, verifies that the user still has an active membership of that merchant, consumes the token atomically, sets the session cookie with the member's current role, clears the handoff cookie, and returns `{ "authenticated": true, "redirect": "/dashboard" }`.
 
 ### Invited team member
 
@@ -21,7 +21,7 @@ Because that redirect is cross-site, the dashboard cannot tell it apart from a l
 3. CAP displays the invitation URL once. The owner shares it through a trusted private channel.
 4. The invitee opens the URL:
    - **New email:** the invitee supplies a name and a password of at least 12 characters, and receives a signed session.
-   - **Email that already has a CAP password:** the invitee first signs in at `/login` with that account, then reopens the link and clicks **Accept invitation**. No password is entered on the invitation page.
+   - **Email that already has a CAP password:** the invitee first signs in at `/login` with that account, then reopens the link and clicks **Accept invitation**. No password is entered on the invitation page. A browser signed in with a different account is offered a sign-out first, because `/login` sends signed-in browsers straight to the dashboard.
 5. Future sign-ins use the invitee's email, password, and the merchant's canonical `*.myshopify.com` domain at `/login`.
 
 Invitation tokens contain 256 bits of randomness. Only their SHA-256 hashes are stored, they expire after seven days, and acceptance is atomic and single-use. Creating a new invitation for the same email revokes older pending invitations.
@@ -30,9 +30,9 @@ Invitation acceptance never verifies a password. An inviter controls the invited
 
 - If the invited email belongs to an account with a password, acceptance requires a valid dashboard session for that same user. Without it the route returns a generic `401` and the invitation stays unused.
 - A password is written only when the account is created, or when the existing account still has no password. The account is re-read inside the acceptance transaction, so a concurrent request cannot overwrite a password.
-- Acceptance attempts are limited in Redis to 10 per 15 minutes, separately per client IP and per invitation token. Excess attempts get `429` with `Retry-After`.
+- Acceptance attempts are limited in Redis to 10 per 15 minutes per invitation token, plus a loose ceiling of 100 per 15 minutes per client address so colleagues behind one office NAT can each accept their own invitation. The client address is the rightmost `X-Forwarded-For` entry, the one appended by Render's proxy. Excess attempts get `429` with `Retry-After`.
 
-An existing account with no active membership cannot sign in, so it cannot accept a new invitation on its own yet. That case needs operator help until account recovery exists.
+An existing account that has a password but no active membership cannot sign in, so it cannot accept a new invitation on its own yet; that case needs operator help until email-based account recovery exists. An existing account without a password accepts normally by choosing its first password.
 
 ## Role matrix
 
@@ -49,10 +49,11 @@ Role changes and membership revocations invalidate existing sessions immediately
 
 - Passwords are hashed with Node.js `scrypt`, a random per-password salt, and timing-safe verification.
 - Login errors do not reveal whether an email, merchant, or password was wrong.
-- Login attempts are limited in Redis per IP, email, and merchant domain.
+- Login attempts are limited in Redis per client address, email, and merchant domain.
 - Session cookies are HTTP-only, `SameSite=Lax`, secure in production, and expire after eight hours.
-- Mutating routes enforce same-origin requests and merchant scoping on the server.
+- Mutating routes enforce same-origin requests (full origin: scheme, host and port, against `DASHBOARD_URL` in production) and merchant scoping on the server.
 - Invitation pages, the owner sign-in confirmation page, and `GET /api/session/merchant` use a no-referrer policy to avoid leaking tokens through navigation headers.
+- `DASHBOARD_SESSION_SECRET` must be at least 32 characters with at least 12 distinct characters; example and trivially patterned values are rejected at boot.
 - Uninstalled merchants cannot be used for team login, owner sign-in, or invitation acceptance.
 
 ## HTTP security headers

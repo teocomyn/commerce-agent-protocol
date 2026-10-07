@@ -14,7 +14,9 @@ describe('runtime secret validation', () => {
   it('decodes hex and base64 keys of exactly 32 bytes', () => {
     expect(decodeCanonicalKey(HEX_KEY)?.length).toBe(32)
     expect(decodeCanonicalKey(Buffer.alloc(32, 7).toString('base64'))?.length).toBe(32)
-    expect(decodeCanonicalKey(Buffer.alloc(32, 7).toString('base64url'))?.length).toBe(32)
+    const urlSafe = Buffer.alloc(32, 0xfb).toString('base64url')
+    expect(urlSafe).toMatch(/[-_]/)
+    expect(decodeCanonicalKey(urlSafe)?.length).toBe(32)
     expect(decodeCanonicalKey('ab'.repeat(16))).toBeNull()
     expect(decodeCanonicalKey('ci-only-32-byte-encryption-key!!')).toBeNull()
   })
@@ -51,5 +53,22 @@ describe('runtime secret validation', () => {
       NODE_ENV: 'production',
       SHOPIFY_API_SECRET: 'your_shopify_api_secret',
     })).toThrow(/SHOPIFY_API_SECRET/)
+  })
+
+  it('rejects an unusable previous key and trivially guessable values at boot', () => {
+    expect(() => assertRuntimeSecrets({ ENCRYPTION_KEY: HEX_KEY, ENCRYPTION_KEY_PREVIOUS: 'abc' }))
+      .toThrow(/ENCRYPTION_KEY_PREVIOUS/)
+    expect(() => assertRuntimeSecrets({ ENCRYPTION_KEY: HEX_KEY, ENCRYPTION_KEY_PREVIOUS: 'legacy-random-string-with-32-bytes!!' }))
+      .not.toThrow()
+    expect(() => assertRuntimeSecrets({ ENCRYPTION_KEY: '12345678901234567890123456789012' }))
+      .toThrow(/trivially guessable/)
+    expect(() => assertRuntimeSecrets({ ENCRYPTION_KEY: HEX_KEY, CAP_OPERATIONS_TOKEN: 'a'.repeat(40) }))
+      .toThrow(/CAP_OPERATIONS_TOKEN/)
+  })
+
+  it('rejects a blank Shopify secret in production but not in MCP mode', () => {
+    const production = { ENCRYPTION_KEY: HEX_KEY, NODE_ENV: 'production', SHOPIFY_API_SECRET: '   ' }
+    expect(() => assertRuntimeSecrets(production)).toThrow(/SHOPIFY_API_SECRET/)
+    expect(() => assertRuntimeSecrets(production, { mode: 'mcp' })).not.toThrow()
   })
 })

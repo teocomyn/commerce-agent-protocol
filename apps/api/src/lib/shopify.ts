@@ -413,7 +413,7 @@ const PRODUCT_FIELDS = /* GraphQL */ `
 const PRODUCT_LIST_QUERY = /* GraphQL */ `
   query CapProducts($cursor: String) {
     shop { currencyCode shipsToCountries shopPolicies { type title body url } }
-    products(first: 100, after: $cursor, sortKey: UPDATED_AT, query: "status:active") {
+    products(first: 100, after: $cursor, sortKey: UPDATED_AT) {
       nodes { ${PRODUCT_FIELDS} }
       pageInfo { hasNextPage endCursor }
     }
@@ -826,12 +826,14 @@ function deriveKey(raw: string): Buffer {
   return decodeCanonicalKey(raw) ?? legacyKey(raw)
 }
 
-// ENCRYPTION_KEY_PREVIOUS keeps tokens readable while the key is rotated;
-// they are re-encrypted with the current key on the next refresh or install.
-function decryptionKeys(versioned: boolean): Buffer[] {
+// ENCRYPTION_KEY_PREVIOUS keeps tokens readable while the key is rotated
+// (see `pnpm --filter @cap/api reencrypt-tokens`). Keys are derived lazily,
+// inside the per-key attempt, so an unusable previous key can never block
+// tokens that the current key decrypts.
+function decryptionKeyCandidates(versioned: boolean): Array<() => Buffer> {
   return [process.env.ENCRYPTION_KEY ?? '', process.env.ENCRYPTION_KEY_PREVIOUS]
     .filter((raw, index): raw is string => index === 0 || Boolean(raw))
-    .map((raw) => versioned ? deriveKey(raw) : legacyKey(raw))
+    .map((raw) => () => versioned ? deriveKey(raw) : legacyKey(raw))
 }
 
 export function encryptToken(plaintext: string): string {
@@ -857,9 +859,9 @@ export function decryptToken(ciphertext: string): string {
   const encrypted = Buffer.from(encryptedHex, 'hex')
 
   let lastError: unknown
-  for (const key of decryptionKeys(versioned)) {
+  for (const candidate of decryptionKeyCandidates(versioned)) {
     try {
-      const decipher = crypto.createDecipheriv(ALGORITHM, key, iv)
+      const decipher = crypto.createDecipheriv(ALGORITHM, candidate(), iv)
       decipher.setAuthTag(tag)
       return decipher.update(encrypted).toString('utf8') + decipher.final('utf8')
     } catch (error) {

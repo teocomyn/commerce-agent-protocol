@@ -35,9 +35,32 @@ function assertStrictCompatible(schema: JsonSchema, path = '$'): void {
 
 describe('LLM enrichment output', () => {
   it('uses a JSON schema accepted by strict structured outputs', () => {
+    expect(LLM_ENRICHMENT_JSON_SCHEMA.type).toBe('object')
     assertStrictCompatible(LLM_ENRICHMENT_JSON_SCHEMA as JsonSchema)
     expect(Object.keys(LLM_ENRICHMENT_JSON_SCHEMA.properties)).not.toContain('certifications')
     expect(Object.keys(LLM_ENRICHMENT_JSON_SCHEMA.properties)).not.toContain('comparison_tags')
+  })
+
+  it('drops claim-like model output and keeps the first duplicate spec', () => {
+    const output = LlmEnrichmentSchema.parse({
+      category: 'Apparel > Tops',
+      subcategory: 'T-shirts',
+      specs: [
+        { name: 'weight_g', value: 180 },
+        { name: 'weight_g', value: 999 },
+        { name: 'material', value: 'GOTS certified organic cotton' },
+        { name: 'eco_label', value: true },
+      ],
+      use_cases: ['everyday wear', 'eco-friendly gifting'],
+      target_audience: ['adults', 'vegan shoppers'],
+      care_info: null,
+      size_guide: null,
+      summary: 'A cotton T-shirt.',
+    })
+    const normalized = normalizeLlmEnrichment(output)
+    expect(normalized.specs).toEqual({ weight_g: 180, eco_label: true })
+    expect(normalized.use_cases).toEqual(['everyday wear'])
+    expect(normalized.target_audience).toEqual(['adults'])
   })
 
   it('normalizes array-shaped specs and size guides', () => {

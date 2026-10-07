@@ -1,18 +1,14 @@
 import Link from 'next/link'
 import type { Metadata } from 'next'
-import { findPendingOwnerLoginToken } from '@/lib/owner-login'
+import { cookies } from 'next/headers'
+import { OWNER_LOGIN_COOKIE, findPendingOwnerLoginToken } from '@/lib/owner-login'
 import ConfirmOwnerSessionForm from './ConfirmOwnerSessionForm'
 
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { referrer: 'no-referrer' }
 
-export default async function ConfirmOwnerSessionPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ token?: string | string[] }>
-}) {
-  const { token } = await searchParams
-  const rawToken = typeof token === 'string' ? token : ''
+export default async function ConfirmOwnerSessionPage() {
+  const rawToken = (await cookies()).get(OWNER_LOGIN_COOKIE)?.value ?? ''
   // Read-only lookup: the token is consumed only by the same-origin POST.
   const loginToken = await findPendingOwnerLoginToken(rawToken)
 
@@ -30,7 +26,7 @@ export default async function ConfirmOwnerSessionPage({
               <strong style={{ color: 'var(--text-primary)' }}>{loginToken.merchant.shopifyDomain}</strong>?
               Only continue if you just connected this store from Shopify.
             </p>
-            <ConfirmOwnerSessionForm token={rawToken} />
+            <ConfirmOwnerSessionForm />
           </>
         ) : (
           <>
