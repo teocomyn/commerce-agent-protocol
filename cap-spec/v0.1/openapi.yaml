@@ -41,8 +41,8 @@ paths:
       description: >-
         Returns products of the calling merchant only. Servers MUST only return
         products the merchant currently offers for sale (for example Shopify
-        status ACTIVE; never drafts, archived, unpublished or unlisted
-        products), and `certifications` MUST come from data declared by the
+        status ACTIVE; never draft, archived or unlisted products, and
+        SHOULD exclude products not published to the served channel), and `certifications` MUST come from data declared by the
         merchant: servers MUST NOT infer or generate certifications, labels or
         environmental claims.
       requestBody:
@@ -118,7 +118,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Out of stock (OUT_OF_STOCK) or same Idempotency-Key still in progress (IDEMPOTENCY_KEY_IN_PROGRESS)
+          description: Out of stock (OUT_OF_STOCK), same Idempotency-Key still in progress (IDEMPOTENCY_KEY_IN_PROGRESS), or first attempt stopped before recording its outcome (IDEMPOTENCY_KEY_OUTCOME_UNKNOWN; retry with a new key)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

@@ -12,20 +12,19 @@ const REFRESH_EARLY_MS = 5 * 60 * 1_000
 
 /**
  * Jobs can outlive an install (uninstall, or shop/redact deleting the shop).
- * Workers skip them instead of failing, so they are not retried for nothing
- * and do not land in the dead-letter queue.
+ * Workers catch this error and skip the job instead of failing, so it is not
+ * retried for nothing and does not land in the dead-letter queue.
  */
-export async function isMerchantInstallActive(merchantId: string): Promise<boolean> {
-  const merchant = await prisma.merchant.findUnique({
-    where: { id: merchantId },
-    select: { uninstalledAt: true, shopifyToken: true },
-  })
-  return Boolean(merchant && !merchant.uninstalledAt && merchant.shopifyToken)
+export class InactiveInstallError extends Error {
+  constructor(merchantId: string) {
+    super(`Shopify installation ${merchantId} is inactive or erased`)
+    this.name = 'InactiveInstallError'
+  }
 }
 
 export async function getValidShopifyAdminToken(merchantId: string): Promise<string> {
   for (let pass = 0; pass < 2; pass++) {
-    const merchant = await prisma.merchant.findUniqueOrThrow({
+    const merchant = await prisma.merchant.findUnique({
       where: { id: merchantId },
       select: {
         shopifyDomain: true,
@@ -35,8 +34,8 @@ export async function getValidShopifyAdminToken(merchantId: string): Promise<str
         uninstalledAt: true,
       },
     })
-    if (merchant.uninstalledAt || !merchant.shopifyToken) {
-      throw new Error('Shopify installation is inactive')
+    if (!merchant || merchant.uninstalledAt || !merchant.shopifyToken) {
+      throw new InactiveInstallError(merchantId)
     }
     if (
       !merchant.accessTokenExpiresAt ||

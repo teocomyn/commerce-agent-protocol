@@ -6,12 +6,13 @@ import {
   deadLetterQueue,
   enrichmentQueue,
   maintenanceQueue,
-  sendToDeadLetter,
+  flushDeadLetterWrites,
+  recordDeadLetter,
   type CatalogSyncJobData,
 } from '../lib/queue.js'
 import { runRetention } from '../lib/retention.js'
 import { fetchShopifyInventorySnapshot, fetchShopifyProducts } from '../lib/shopify.js'
-import { getValidShopifyAdminToken, isMerchantInstallActive } from '../lib/shopify-token.js'
+import { InactiveInstallError, getValidShopifyAdminToken } from '../lib/shopify-token.js'
 import { applyInventorySnapshot } from '../lib/inventory.js'
 import { invalidateMerchantSearchCache, redis } from '../lib/redis.js'
 import { assertRuntimeSecrets } from '../lib/secrets.js'
@@ -23,11 +24,14 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
   'catalog-sync',
   async (job) => {
     const { merchantId, shopDomain } = job.data
-    if (!(await isMerchantInstallActive(merchantId))) {
+    let token: string
+    try {
+      token = await getValidShopifyAdminToken(merchantId)
+    } catch (error) {
+      if (!(error instanceof InactiveInstallError)) throw error
       console.log(`[CatalogSync] Skipping job ${job.id}: ${shopDomain} is no longer installed`)
       return { skipped: 'merchant-inactive' }
     }
-    const token = await getValidShopifyAdminToken(merchantId)
 
     if (job.data.kind === 'inventory') {
       const snapshot = await fetchShopifyInventorySnapshot(
@@ -44,9 +48,17 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
             WHERE variant->>'inventory_item_id' = ${String(snapshot.inventory_item_id)}
           )
       `
-      // Not synchronized yet: the enrichment job schedules its own snapshot
-      // once the product row exists, so there is nothing to retry here.
+      // Product not synchronized yet. Its enrichment job schedules a snapshot
+      // once the row exists; in case that job never runs, look once more
+      // later instead of dropping a webhook-driven update.
       if (products.length === 0) {
+        if (!job.data.deferred) {
+          await catalogSyncQueue.add(
+            'inventory-level-sync',
+            { ...job.data, deferred: true },
+            { delay: 120_000, priority: 2, jobId: `${job.id}-deferred` },
+          )
+        }
         return { inventoryItemId: snapshot.inventory_item_id, productsUpdated: 0, skipped: 'not-normalized' }
       }
       await prisma.$transaction(products.map((product) => prisma.productRaw.update({
@@ -130,7 +142,7 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
 
 catalogSyncWorker.on('failed', (job, err) => {
   console.error(`[CatalogSync] Job ${job?.id} failed:`, err)
-  void sendToDeadLetter('catalog-sync', job, err)
+  recordDeadLetter('catalog-sync', job, err)
 })
 
 // Daily data retention (GDPR) at 03:00 UTC. upsertJobScheduler is idempotent,
@@ -147,18 +159,13 @@ export const maintenanceWorker = new Worker(
 
 maintenanceWorker.on('failed', (job, err) => {
   console.error(`[Maintenance] Job ${job?.id} failed:`, err)
-  void sendToDeadLetter('maintenance', job, err)
+  recordDeadLetter('maintenance', job, err)
 })
-
-await maintenanceQueue.upsertJobScheduler(
-  'daily-retention',
-  { pattern: '0 3 * * *', tz: 'UTC' },
-  { name: 'retention' },
-)
 
 registerGracefulShutdown('catalog-worker', [
   // Waits for active jobs (a page of the catalog or a snapshot) to finish.
   { name: 'workers', close: () => Promise.all([catalogSyncWorker.close(), maintenanceWorker.close()]) },
+  { name: 'dead-letter writes', close: () => flushDeadLetterWrites() },
   {
     name: 'queues',
     close: () => Promise.all([
@@ -171,5 +178,13 @@ registerGracefulShutdown('catalog-worker', [
   { name: 'redis', close: () => redis.quit() },
   { name: 'postgres', close: () => prisma.$disconnect() },
 ], 110_000)
+
+// Registered after the shutdown handler and not awaited: a Redis outage at
+// startup must not block the process before it can react to SIGTERM.
+void maintenanceQueue.upsertJobScheduler(
+  'daily-retention',
+  { pattern: '0 3 * * *', tz: 'UTC' },
+  { name: 'retention' },
+).catch((error: unknown) => console.error('[Maintenance] Could not register the daily retention schedule:', error))
 
 console.log('[Worker] Catalog sync worker started')

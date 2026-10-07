@@ -47,13 +47,15 @@ Role changes and membership revocations invalidate existing sessions immediately
 
 ## Session revocation
 
-Each session payload carries `mv`, the membership version: `MerchantMember.updatedAt` in epoch milliseconds when the session was issued. On every authenticated request the dashboard reloads the membership and rejects the session when the membership is revoked, its role differs, or its `updatedAt` no longer equals `mv` (`isSessionMembershipCurrent` in `apps/dashboard/lib/dashboard-session.ts`).
+Each session payload carries `mv`, the membership version: `merchant_members.session_version` when the session was issued. On every authenticated request the dashboard reloads the membership and rejects the session when the membership is revoked, its role differs, or its `session_version` no longer equals `mv` (`isSessionMembershipCurrent` in `apps/dashboard/lib/dashboard-session.ts`). The counter is incremented atomically, so unlike a timestamp it cannot repeat across clocks or fast writes.
 
-Any write to the membership row therefore signs out every session issued before it for that member and merchant, including on other devices:
+These changes increment it and sign out every session issued before them for that member and merchant, including on other devices:
 
-- an owner changes the member's role (even to the same role) or revokes the member;
+- an owner changes the member's role or revokes the member;
 - a revoked member is invited again and accepts;
-- the owner reconnects through Shopify OAuth or reinstalls the app (the API upserts the owner membership), and uninstalling revokes every membership.
+- an owner who was revoked or demoted is reinstated by a Shopify reinstall, and uninstalling revokes every membership.
+
+A routine Shopify OAuth re-authorization of an active owner (for example after a scope change) does not touch the membership, so it does not sign the owner out.
 
 Cookies issued before membership versioning carry no `mv` and are rejected. After this change is deployed every signed-in user must sign in once more: team members at `/login`, owners through the Shopify connection flow.
 

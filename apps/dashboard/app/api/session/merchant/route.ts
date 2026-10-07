@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
         merchantId: loginToken.merchantId,
       },
     },
-    select: { role: true, revokedAt: true, updatedAt: true },
+    select: { role: true, revokedAt: true, sessionVersion: true },
   })
   if (!membership || membership.revokedAt) {
     return NextResponse.json({ error: 'Membership is not active' }, { status: 403 })
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     userId: loginToken.userId,
     merchantId: loginToken.merchantId,
     role: membership.role,
-    mv: membershipVersion(membership.updatedAt),
+    mv: membershipVersion(membership),
   })
   const response = NextResponse.json({ authenticated: true, redirect: '/dashboard' })
   const cookie = dashboardSessionCookie(sessionToken)

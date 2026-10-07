@@ -121,6 +121,20 @@ export const DUMMY_PASSWORD_HASH = formatPasswordHash(
   Buffer.alloc(SCRYPT_KEY_LENGTH),
 )
 
+// While legacy hashes (N=2^14) are still being upgraded, verification of a
+// legacy hash is cheaper than of a current one or of the dummy used for
+// unknown emails, which would let response times reveal which accounts exist.
+// Every verification therefore also runs the derivation of the other format,
+// in parallel, so all paths cost the same. Remove once no legacy hash remains.
+const PAD_LEGACY_TIMING = true
+
+async function timingPad(legacy: boolean, password: string): Promise<void> {
+  if (!PAD_LEGACY_TIMING) return
+  const params = legacy ? SCRYPT_PARAMS : LEGACY_SCRYPT_PARAMS
+  const keyLength = legacy ? SCRYPT_KEY_LENGTH : 32
+  await deriveKey(password, Buffer.alloc(SCRYPT_SALT_BYTES), keyLength, params).catch(() => undefined)
+}
+
 export async function verifyHumanPassword(password: string, stored: string): Promise<boolean> {
   if (password.length > MAX_HUMAN_PASSWORD_LENGTH) return false
   const parsed = parsePasswordHash(stored)
@@ -128,7 +142,10 @@ export async function verifyHumanPassword(password: string, stored: string): Pro
 
   let derived: Buffer
   try {
-    derived = await deriveKey(password, parsed.salt, parsed.key.length, parsed.params)
+    ;[derived] = await Promise.all([
+      deriveKey(password, parsed.salt, parsed.key.length, parsed.params),
+      timingPad(parsed.legacy, password),
+    ])
   } catch {
     return false
   }

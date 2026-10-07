@@ -26,6 +26,7 @@ interface Invitation {
 interface TeamData {
   members: Member[]
   invitations: Invitation[]
+  canManage: boolean
 }
 
 const buttonStyle = {
@@ -34,10 +35,11 @@ const buttonStyle = {
 }
 
 export default function TeamClient({ role }: { role: Role | null }) {
-  // Team management is owner-only. This only hides controls; the API routes
-  // enforce the same rule.
-  const canManage = role === 'OWNER'
   const [data, setData] = useState<TeamData | null>(null)
+  // Team management is owner-only. This only hides controls; the API routes
+  // enforce the same rule. The server-rendered role is used until /api/team
+  // answers, then every reload follows the current membership.
+  const canManage = data ? data.canManage : role === 'OWNER'
   const [email, setEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'ADMIN' | 'ANALYST'>('ANALYST')
   const [invitationUrl, setInvitationUrl] = useState<string | null>(null)
@@ -65,11 +67,9 @@ export default function TeamClient({ role }: { role: Role | null }) {
     setError(null)
     let response: Response
     try {
-      response = await fetch(url, {
-        method,
-        headers: body ? { 'Content-Type': 'application/json' } : undefined,
-        body: body ? JSON.stringify(body) : undefined,
-      })
+      response = await fetch(url, body
+        ? { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+        : { method })
     } catch {
       setError(NETWORK_ERROR_MESSAGE)
       return false

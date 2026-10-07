@@ -102,4 +102,12 @@ describe('enrichment source hash', () => {
     expect(enrichmentSourceHash(source)).not.toBe(enrichmentSourceHash({ ...source, description: 'Black leather.' }))
     expect(enrichmentSourceHash(source)).not.toBe(enrichmentSourceHash({ ...source, tags: ['black'] }))
   })
+
+  it('ignores image URL changes when the alt text sent to the model is unchanged', () => {
+    const withAlt = { ...source, images: [{ src: 'https://cdn.example/1.jpg', alt: 'White sneaker' }] }
+    expect(enrichmentSourceHash(withAlt)).toBe(enrichmentSourceHash({
+      ...withAlt,
+      images: [{ src: 'https://cdn.example/1.jpg?v=2', alt: 'White sneaker' }],
+    }))
+  })
 })

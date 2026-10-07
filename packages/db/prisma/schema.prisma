@@ -88,13 +88,16 @@ model MerchantInvitation {
 }
 
 model MerchantMember {
-  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId     String       @map("user_id") @db.Uuid
-  merchantId String       @map("merchant_id") @db.Uuid
-  role       MerchantRole @default(ANALYST)
-  revokedAt  DateTime?    @map("revoked_at") @db.Timestamptz
-  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt  DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String       @map("user_id") @db.Uuid
+  merchantId     String       @map("merchant_id") @db.Uuid
+  role           MerchantRole @default(ANALYST)
+  revokedAt      DateTime?    @map("revoked_at") @db.Timestamptz
+  // Incremented on every change that must sign the member out (dashboard
+  // sessions carry it as `mv`).
+  sessionVersion Int          @default(0) @map("session_version")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
@@ -140,20 +143,22 @@ model WebhookEvent {
 // RAW PRODUCTS (Shopify mirror)
 // ============================================================
 model ProductRaw {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  merchantId  String    @map("merchant_id") @db.Uuid
-  shopifyId   BigInt    @map("shopify_id")
-  title       String
-  description String?
-  vendor      String?   @db.VarChar(255)
-  productType String?   @map("product_type") @db.VarChar(255)
-  tags        String[]  @default([])
-  variants    Json      @db.JsonB // price, SKU, stock, options
-  images      Json?     @db.JsonB
-  metafields  Json?     @db.JsonB
-  status      String?   @db.VarChar(50)
-  syncedAt    DateTime  @default(now()) @map("synced_at") @db.Timestamptz
-  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  merchantId       String    @map("merchant_id") @db.Uuid
+  shopifyId        BigInt    @map("shopify_id")
+  title            String
+  description      String?
+  vendor           String?   @db.VarChar(255)
+  productType      String?   @map("product_type") @db.VarChar(255)
+  tags             String[]  @default([])
+  variants         Json      @db.JsonB // price, SKU, stock, options
+  images           Json?     @db.JsonB
+  metafields       Json?     @db.JsonB
+  status           String?   @db.VarChar(50)
+  // Shopify updatedAt of the stored revision; older responses never overwrite it.
+  shopifyUpdatedAt DateTime? @map("shopify_updated_at") @db.Timestamptz
+  syncedAt         DateTime  @default(now()) @map("synced_at") @db.Timestamptz
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz
 
   merchant        Merchant         @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   productEnriched ProductEnriched?

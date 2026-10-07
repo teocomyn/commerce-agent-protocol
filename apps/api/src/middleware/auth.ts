@@ -20,6 +20,8 @@ declare module 'hono' {
   }
 }
 
+export const API_KEY_CACHE_TTL_SECONDS = 60
+
 const RATE_LIMITS: Record<string, number> = {
   free: 100,
   starter: 1000,
@@ -71,8 +73,9 @@ export const authMiddleware = createMiddleware(async (c, next) => {
       plan: apiKeyRecord.merchant.plan,
     }
 
-    // Cache for 5 minutes
-    await cacheSet(cacheKey, authData, 300)
+    // Revocation deletes this entry; if that deletion fails the key stays
+    // usable until the entry expires, so keep the window short.
+    await cacheSet(cacheKey, authData, API_KEY_CACHE_TTL_SECONDS)
 
     // Update last used (fire and forget)
     prisma.apiKey.update({

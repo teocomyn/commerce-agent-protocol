@@ -388,6 +388,11 @@ describe.sequential('CAP integration boundaries', () => {
     }
   })
 
+  it('reports uninstalled or erased shops as inactive installs', async () => {
+    const { InactiveInstallError } = await import('../lib/shopify-token.js')
+    await expect(getValidShopifyAdminToken(crypto.randomUUID())).rejects.toBeInstanceOf(InactiveInstallError)
+  })
+
   it('rotates expiring offline credentials and disables an install that loses scopes', async () => {
     process.env.SHOPIFY_API_KEY = 'integration-client-id'
     process.env.SHOPIFY_SCOPES = 'read_products,read_inventory,read_orders'
@@ -551,6 +556,57 @@ describe.sequential('CAP integration boundaries', () => {
     expect((await send(body, 'not a valid key')).status).toBe(400)
   })
 
+  it('reports in-progress and unknown outcomes for an unfinished idempotent checkout', async () => {
+    const app = new Hono()
+    app.use('/v1/*', authMiddleware)
+    app.route('/v1/checkout', checkoutRouter)
+    const body = { product_id: productA, quantity: 1, shipping_country: 'FR' }
+    const requestHash = crypto.createHash('sha256').update(JSON.stringify(body)).digest('hex')
+    const send = (idempotencyKey: string) => app.request('/v1/checkout/initiate', {
+      method: 'POST',
+      headers: { 'X-CAP-Key': validKey, 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(body),
+    })
+    const seed = (idempotencyKey: string, createdAt: Date) => prisma.agentCheckout.create({
+      data: {
+        merchantId: merchantA,
+        productId: productA,
+        trackingToken: crypto.randomBytes(32).toString('hex'),
+        status: 'creating',
+        idempotencyKey,
+        requestHash,
+        createdAt,
+      },
+    })
+    await seed(`running-${suffix}`, new Date())
+    await seed(`stuck-${suffix}`, new Date(Date.now() - 10 * 60_000))
+
+    const running = await send(`running-${suffix}`)
+    expect(running.status).toBe(409)
+    await expect(running.json()).resolves.toMatchObject({ error: { code: 'IDEMPOTENCY_KEY_IN_PROGRESS' } })
+    const stuck = await send(`stuck-${suffix}`)
+    expect(stuck.status).toBe(409)
+    await expect(stuck.json()).resolves.toMatchObject({ error: { code: 'IDEMPOTENCY_KEY_OUTCOME_UNKNOWN' } })
+  })
+
+  it('replays an upstream failure instead of retrying under the same key', async () => {
+    createShopifyCartMock.mockClear()
+    createShopifyCartMock.mockRejectedValueOnce(new Error('Shopify timeout'))
+    const app = new Hono()
+    app.use('/v1/*', authMiddleware)
+    app.route('/v1/checkout', checkoutRouter)
+    const send = () => app.request('/v1/checkout/initiate', {
+      method: 'POST',
+      headers: { 'X-CAP-Key': validKey, 'Content-Type': 'application/json', 'Idempotency-Key': `failed-${suffix}` },
+      body: JSON.stringify({ product_id: productA, quantity: 1, shipping_country: 'FR' }),
+    })
+    expect((await send()).status).toBe(502)
+    const replay = await send()
+    expect(replay.status).toBe(502)
+    expect(replay.headers.get('Idempotent-Replayed')).toBe('true')
+    expect(createShopifyCartMock).toHaveBeenCalledTimes(1)
+  })
+
   it('hides draft products from search, compare and checkout', async () => {
     // A second, active product so compare has something valid to pair with.
     const otherRaw = await prisma.productRaw.create({
@@ -669,15 +725,23 @@ describe.sequential('CAP integration boundaries', () => {
 
     expect((await signedWebhook('customers/data_request', domains[0]!, `data-request-${suffix}`)).status).toBe(200)
 
-    // An installed shop is never erased, even if a shop/redact arrives.
-    expect((await signedWebhook('shop/redact', domains[0]!, `shop-redact-a-${suffix}`)).status).toBe(200)
+    // An installed shop is never erased. The webhook fails (durable failed
+    // event) so Shopify redelivers once the uninstall is recorded.
+    expect((await signedWebhook('shop/redact', domains[0]!, `shop-redact-a-${suffix}`)).status).toBe(500)
     expect(await prisma.merchant.findUnique({ where: { id: merchantA } })).not.toBeNull()
+    expect((await prisma.webhookEvent.findUniqueOrThrow({ where: { webhookId: `shop-redact-a-${suffix}` } })).status)
+      .toBe('failed')
 
-    // merchantB was uninstalled by the previous test: everything is erased.
+    // merchantB was uninstalled by the previous test: everything is erased,
+    // including cached API key lookups.
     await prisma.agentQuery.create({
       data: { merchantId: merchantB, agentId: 'gdpr', queryText: `gift idea ${suffix}` },
     })
+    const keyB = await createKey(merchantB, 'gdpr-cached-key')
+    const keyBHash = crypto.createHash('sha256').update(keyB).digest('hex')
+    await redis.set(`apikey:${keyBHash}`, JSON.stringify({ merchantId: merchantB }))
     expect((await signedWebhook('shop/redact', domains[1]!, `shop-redact-b-${suffix}`)).status).toBe(200)
+    expect(await redis.exists(`apikey:${keyBHash}`)).toBe(0)
     expect(await prisma.merchant.findUnique({ where: { id: merchantB } })).toBeNull()
     expect(await prisma.productEnriched.findUnique({ where: { id: productB } })).toBeNull()
     expect(await prisma.agentQuery.count({ where: { queryText: `gift idea ${suffix}` } })).toBe(0)
@@ -695,8 +759,20 @@ describe.sequential('CAP integration boundaries', () => {
     const fresh = await prisma.agentQuery.create({
       data: { merchantId: merchantA, agentId: 'retention', queryText: 'fresh query' },
     })
-    const result = await runRetention()
-    expect(result.agentQueries).toBeGreaterThanOrEqual(1)
+    const orphan = await prisma.agentQuery.create({
+      data: { merchantId: null, agentId: 'retention', queryText: 'orphan query' },
+    })
+    const originalRetention = process.env.AGENT_QUERY_RETENTION_DAYS
+    process.env.AGENT_QUERY_RETENTION_DAYS = '180'
+    let result: Awaited<ReturnType<typeof runRetention>>
+    try {
+      result = await runRetention()
+    } finally {
+      if (originalRetention === undefined) delete process.env.AGENT_QUERY_RETENTION_DAYS
+      else process.env.AGENT_QUERY_RETENTION_DAYS = originalRetention
+    }
+    expect(result.agentQueries).toBeGreaterThanOrEqual(2)
+    expect(await prisma.agentQuery.findUnique({ where: { id: orphan.id } })).toBeNull()
     expect(await prisma.agentQuery.findUnique({ where: { id: old.id } })).toBeNull()
     expect(await prisma.agentQuery.findUnique({ where: { id: fresh.id } })).not.toBeNull()
   })

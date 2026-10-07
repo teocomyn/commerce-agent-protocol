@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
           revokedAt: null,
           merchant: { shopifyDomain: shop, uninstalledAt: null },
         },
-        select: { merchantId: true, role: true, updatedAt: true },
+        select: { merchantId: true, role: true, sessionVersion: true },
         take: 1,
       },
     },
@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
     userId: user.id,
     merchantId: membership.merchantId,
     role: membership.role,
-    mv: membershipVersion(membership.updatedAt),
+    mv: membershipVersion(membership),
   })
   const response = NextResponse.json({ authenticated: true, redirect: '/dashboard' })
   const cookie = dashboardSessionCookie(token)

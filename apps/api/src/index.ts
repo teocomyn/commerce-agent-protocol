@@ -402,7 +402,7 @@ app.get('/openapi.json', async (c) => {
             '400': { description: 'Invalid request body or Idempotency-Key' },
             '403': { description: 'API key not authorized for this merchant' },
             '404': { description: 'Product or variant not found' },
-            '409': { description: 'Out of stock, or same Idempotency-Key still in progress' },
+            '409': { description: 'Out of stock, same Idempotency-Key still in progress, or outcome of the first attempt unknown (retry with a new key)' },
             '422': { description: 'Shipping country not served, or Idempotency-Key reused with another body' },
             '502': { description: 'Shopify Storefront API error' },
             '503': { description: 'Storefront access token not provisioned' },

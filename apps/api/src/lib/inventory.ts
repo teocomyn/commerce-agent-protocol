@@ -57,10 +57,13 @@ export function applyInventoryLevelUpdate(
       )
       : []
     if (existingLevels.length === 0) {
+      // Other locations are unknown until the snapshot lands. The new total is
+      // at least this location's quantity: exact for single-location shops and
+      // a conservative lower bound otherwise, instead of zeroing the stock.
       return {
         ...variant,
         inventory_levels: [{ location_id: storedLocationId(locationId), available }],
-        inventory_quantity: 0,
+        inventory_quantity: available,
         inventory_stale: true,
       }
     }
@@ -125,9 +128,14 @@ export function carryOverInventoryLevels(
     for (const candidate of existing) {
       if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue
       const variant = candidate as Record<string, unknown>
-      const levels = variant['inventory_levels']
-      if (variant['inventory_item_id'] == null || !Array.isArray(levels) || levels.length === 0) continue
-      previousLevels.set(String(variant['inventory_item_id']), levels as Array<Record<string, unknown>>)
+      const rawLevels = variant['inventory_levels']
+      if (variant['inventory_item_id'] == null || !Array.isArray(rawLevels)) continue
+      // Stored JSON may contain malformed entries; keep only well-formed levels.
+      const levels = rawLevels.filter((level): level is Record<string, unknown> =>
+        Boolean(level) && typeof level === 'object' && !Array.isArray(level) &&
+        (level as Record<string, unknown>)['location_id'] != null)
+      if (levels.length === 0) continue
+      previousLevels.set(String(variant['inventory_item_id']), levels)
     }
   }
 

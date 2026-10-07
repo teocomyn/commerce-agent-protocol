@@ -44,7 +44,9 @@ The catalog worker runs a `maintenance` job every day at 03:00 UTC (BullMQ job s
 - agent queries older than `AGENT_QUERY_RETENTION_DAYS` (default 180): they contain free text typed by shoppers;
 - processed webhook receipts older than `WEBHOOK_EVENT_RETENTION_DAYS` (default 30);
 - dashboard login tokens one day after expiry or use, and invitations 30 days after expiry, acceptance, or revocation;
-- and it marks checkouts stuck in `creating` for over a day as `failed`, releasing their idempotency key.
+- and it marks checkouts stuck in `creating` for over a day as `failed`, storing an "outcome unknown" answer for their idempotency key (the key is never released, because the Shopify cart may exist).
+
+Agent queries without a merchant (from an erased shop or recorded before `merchant_id` existed) are deleted by the same job. A `shop/redact` received for a shop that is not marked uninstalled fails on purpose (`webhook_events.status = failed`, HTTP 500) so Shopify redelivers it; investigate why `app/uninstalled` was missed.
 
 Shopify compliance webhooks are handled on the same `/webhooks/shopify` endpoint. Configure the three topics in the Shopify app (Dev Dashboard or `shopify.app.toml` `compliance_topics`); they cannot be registered through the Admin API:
 

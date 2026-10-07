@@ -107,7 +107,7 @@ curl -X POST http://localhost:3000/v1/search \
   -d '{"query":"white eco-friendly sneakers under 120","limit":3}'
 ```
 
-Send an `Idempotency-Key` header on `POST /v1/checkout/initiate`: a retried request with the same key and body returns the first checkout instead of creating a second Shopify cart.
+Send an `Idempotency-Key` header on `POST /v1/checkout/initiate`: a retried request with the same key and body returns the first outcome (checkout or error) instead of creating a second Shopify cart. Keys are never released; to try again after a failure, use a new key.
 
 **Run as MCP server** (stdio, for Claude Desktop / Cursor):
 

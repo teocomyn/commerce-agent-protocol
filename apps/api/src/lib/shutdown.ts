@@ -13,10 +13,6 @@ export interface ShutdownStep {
 
 let shuttingDown = false
 
-export function isShuttingDown(): boolean {
-  return shuttingDown
-}
-
 export async function runShutdown(processName: string, steps: ShutdownStep[]): Promise<void> {
   for (const step of steps) {
     try {
@@ -51,6 +47,8 @@ export function registerGracefulShutdown(
       process.exit(0)
     })
   }
-  process.once('SIGTERM', handler)
-  process.once('SIGINT', handler)
+  // `on`, not `once`: a second signal during the drain must hit the guard
+  // above instead of Node's default handler, which would exit immediately.
+  process.on('SIGTERM', handler)
+  process.on('SIGINT', handler)
 }

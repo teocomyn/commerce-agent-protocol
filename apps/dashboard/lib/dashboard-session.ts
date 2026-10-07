@@ -10,7 +10,7 @@ export interface DashboardSession {
   userId: string
   merchantId: string
   role: MerchantRole
-  /** Membership version: MerchantMember.updatedAt (epoch ms) when the session was issued. */
+  /** Membership version: MerchantMember.sessionVersion when the session was issued. */
   mv: number
   expiresAt: number
 }
@@ -19,25 +19,25 @@ export interface DashboardSession {
 export interface SessionMembership {
   role: MerchantRole
   revokedAt: Date | null
-  updatedAt: Date
+  sessionVersion: number
 }
 
-export function membershipVersion(updatedAt: Date): number {
-  return updatedAt.getTime()
+export function membershipVersion(membership: Pick<SessionMembership, 'sessionVersion'>): number {
+  return membership.sessionVersion
 }
 
 /**
  * A session stays valid only while its membership is active, has the same
- * role, and has not been written since the session was issued. Every
- * membership write (role change, revocation, re-invitation, app reinstall)
- * bumps updatedAt, which invalidates all sessions issued before it.
+ * role, and its session version has not moved since the session was issued.
+ * Role changes, revocations, re-invitations and owner reinstatement increment
+ * the version atomically, which invalidates all sessions issued before it.
  */
 export function isSessionMembershipCurrent(
   session: Pick<DashboardSession, 'role' | 'mv'>,
   membership: SessionMembership | null,
 ): boolean {
   if (!membership || membership.revokedAt) return false
-  return membership.role === session.role && membershipVersion(membership.updatedAt) === session.mv
+  return membership.role === session.role && membershipVersion(membership) === session.mv
 }
 
 function signature(payload: string): string {
@@ -108,7 +108,7 @@ export async function getDashboardSession(
         merchantId: session.merchantId,
       },
     },
-    select: { role: true, revokedAt: true, updatedAt: true },
+    select: { role: true, revokedAt: true, sessionVersion: true },
   })
 
   return isSessionMembershipCurrent(session, membership) ? session : null

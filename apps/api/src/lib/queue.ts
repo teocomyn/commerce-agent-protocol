@@ -48,6 +48,24 @@ export const deadLetterQueue = new Queue('dead-letter', {
   },
 })
 
+const pendingDeadLetterWrites = new Set<Promise<void>>()
+
+/**
+ * Records a failed job in the dead-letter queue without blocking the worker's
+ * event handler, while keeping track of the write so shutdown can await it
+ * before closing the queue.
+ */
+export function recordDeadLetter(sourceQueue: string, job: Job | undefined, error: Error): void {
+  const write = sendToDeadLetter(sourceQueue, job, error)
+    .catch((writeError: unknown) => console.error('[DLQ] Failed to record dead letter:', writeError))
+    .finally(() => pendingDeadLetterWrites.delete(write))
+  pendingDeadLetterWrites.add(write)
+}
+
+export async function flushDeadLetterWrites(): Promise<void> {
+  await Promise.all([...pendingDeadLetterWrites])
+}
+
 export async function sendToDeadLetter(
   sourceQueue: string,
   job: Job | undefined,
@@ -87,6 +105,8 @@ export interface InventorySyncJobData {
   shopDomain: string
   kind: 'inventory'
   inventoryItemId: string
+  /** Set on the single delayed retry when the product was not stored yet. */
+  deferred?: boolean
 }
 
 export type CatalogSyncJobData = FullCatalogSyncJobData | InventorySyncJobData

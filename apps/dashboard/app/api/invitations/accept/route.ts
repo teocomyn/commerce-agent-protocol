@@ -161,15 +161,15 @@ export async function POST(req: NextRequest) {
           merchantId: invitation.merchantId,
           role: invitation.role,
         },
-        update: { role: invitation.role, revokedAt: null },
+        // Incrementing the version signs out sessions issued for an earlier
+        // membership of this user at this merchant.
+        update: { role: invitation.role, revokedAt: null, sessionVersion: { increment: 1 } },
       })
-      // The upsert bumps updatedAt, so sessions issued for an earlier
-      // membership of this user at this merchant stop working.
       return {
         userId,
         merchantId: membership.merchantId,
         role: membership.role,
-        mv: membershipVersion(membership.updatedAt),
+        mv: membershipVersion(membership),
       }
     })
   } catch (error) {

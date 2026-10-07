@@ -8,8 +8,7 @@ import {
 } from './dashboard-session'
 
 const SECRET = '9f2c7a1e5b3d8f4a6c0e2b7d9f1a3c5e'
-const MEMBERSHIP_UPDATED_AT = new Date('2026-10-07T12:00:00.123Z')
-const MV = MEMBERSHIP_UPDATED_AT.getTime()
+const MV = 3
 
 function signPayload(fields: Record<string, unknown>): string {
   const payload = Buffer.from(JSON.stringify(fields)).toString('base64url')
@@ -88,20 +87,19 @@ describe('signed dashboard sessions', () => {
 
 describe('membership version check', () => {
   const session = { role: 'ADMIN' as const, mv: MV }
-  const membership = { role: 'ADMIN' as const, revokedAt: null, updatedAt: MEMBERSHIP_UPDATED_AT }
+  const membership = { role: 'ADMIN' as const, revokedAt: null, sessionVersion: MV }
 
-  it('derives the version from the membership updatedAt in milliseconds', () => {
-    expect(membershipVersion(MEMBERSHIP_UPDATED_AT)).toBe(MV)
+  it('uses the membership session version counter', () => {
+    expect(membershipVersion(membership)).toBe(MV)
   })
 
   it('accepts a session whose membership is unchanged', () => {
     expect(isSessionMembershipCurrent(session, membership)).toBe(true)
-    expect(isSessionMembershipCurrent(session, { ...membership, updatedAt: new Date(MV) })).toBe(true)
   })
 
-  it('rejects a session once the membership row has been written again', () => {
-    expect(isSessionMembershipCurrent(session, { ...membership, updatedAt: new Date(MV + 1) })).toBe(false)
-    expect(isSessionMembershipCurrent(session, { ...membership, updatedAt: new Date(MV - 1) })).toBe(false)
+  it('rejects a session once the membership version has moved', () => {
+    expect(isSessionMembershipCurrent(session, { ...membership, sessionVersion: MV + 1 })).toBe(false)
+    expect(isSessionMembershipCurrent(session, { ...membership, sessionVersion: MV - 1 })).toBe(false)
   })
 
   it('rejects a session whose role or membership no longer matches', () => {

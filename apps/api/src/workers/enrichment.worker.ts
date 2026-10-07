@@ -6,7 +6,8 @@ import {
   deadLetterQueue,
   enrichmentQueue,
   maintenanceQueue,
-  sendToDeadLetter,
+  flushDeadLetterWrites,
+  recordDeadLetter,
   type EnrichmentJobData,
 } from '../lib/queue.js'
 import { redis } from '../lib/redis.js'
@@ -27,7 +28,7 @@ export const enrichmentWorker = new Worker<EnrichmentJobData>(
 
 enrichmentWorker.on('failed', (job, err) => {
   console.error(`[Worker] Job ${job?.id} failed:`, err)
-  void sendToDeadLetter('enrichment', job, err)
+  recordDeadLetter('enrichment', job, err)
 })
 
 enrichmentWorker.on('completed', (job, result) => {
@@ -38,6 +39,7 @@ enrichmentWorker.on('completed', (job, result) => {
 registerGracefulShutdown('enrichment-worker', [
   // Waits for active jobs to finish instead of letting them stall and re-run.
   { name: 'worker', close: () => enrichmentWorker.close() },
+  { name: 'dead-letter writes', close: () => flushDeadLetterWrites() },
   {
     name: 'queues',
     close: () => Promise.all([

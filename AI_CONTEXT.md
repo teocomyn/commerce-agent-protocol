@@ -43,9 +43,9 @@ Prototype / unrelated standalone product. No paying user, no adopter, no product
 - Example secrets are rejected at boot (API, workers, MCP, dashboard). Production requires `ENCRYPTION_KEY` as 64 hex chars or base64 of 32 bytes; new ciphertexts use the `v2:` format; `ENCRYPTION_KEY_PREVIOUS` supports rotation.
 - No `db:push`: schema changes ship as migrations, CI checks drift. The pgvector `embedding` column is declared `Unsupported("vector(1536)")`.
 - Owner sign-in after OAuth requires a same-origin confirmation POST (`/session/confirm`); invitation acceptance never checks passwords for existing accounts.
-- Dashboard sessions carry the membership version (`mv` = `merchant_members.updated_at`); any membership write signs that member out everywhere. Password hashes store their scrypt parameters (`scrypt$N=…,r=…,p=…$salt$key`) and are upgraded on login.
+- Dashboard sessions carry the membership version (`mv` = `merchant_members.session_version`, an atomically incremented counter); role changes, revocations, re-invitations and owner reinstatement sign that member out everywhere, routine OAuth re-authorization does not. Password hashes store their scrypt parameters (`scrypt$N=…,r=…,p=…$salt$key`) and are upgraded on login.
 - Enrichment calls OpenAI only when `products_enriched.source_hash` (content + `ENRICHMENT_VERSION`) changes; bump `ENRICHMENT_VERSION` after prompt or schema changes.
-- `POST /v1/checkout/initiate` supports `Idempotency-Key` (stored on `agent_checkouts`, replayed with `Idempotent-Replayed: true`).
+- `POST /v1/checkout/initiate` supports `Idempotency-Key` (stored on `agent_checkouts`; the first outcome, success or error, is replayed with `Idempotent-Replayed: true`; keys are never released, an unfinished attempt answers `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`).
 - GDPR: Shopify compliance topics handled on `/webhooks/shopify`; daily `maintenance` job (03:00 UTC, catalog worker) purges agent queries after 180 days and webhook receipts after 30 days.
 - Processes run `node` as PID 1 and drain on SIGTERM; every Render service runs `pnpm db:migrate` before deploy.
 

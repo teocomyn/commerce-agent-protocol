@@ -34,9 +34,10 @@ vi.mock('../lib/shopify.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/shopify.js')>(),
   fetchShopifyProduct: fetchShopifyProductMock,
 }))
+const getValidShopifyAdminTokenMock = vi.hoisted(() => vi.fn(async (_merchantId: string) => 'admin-token'))
 vi.mock('../lib/shopify-token.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/shopify-token.js')>(),
-  getValidShopifyAdminToken: vi.fn(async () => 'admin-token'),
+  getValidShopifyAdminToken: getValidShopifyAdminTokenMock,
 }))
 
 const { runEnrichmentJob } = await import('../lib/enrichment-pipeline.js')
@@ -104,9 +105,16 @@ describe.sequential('enrichment pipeline', () => {
   beforeEach(() => {
     chatCreateMock.mockClear()
     embeddingsCreateMock.mockClear()
+    // Drop call history and any product queued by a test that failed early.
+    fetchShopifyProductMock.mockReset()
   })
 
   afterAll(async () => {
+    // Snapshot jobs scheduled by these runs must not reach a real worker.
+    const jobs = await catalogSyncQueue.getJobs(['waiting', 'prioritized', 'delayed'])
+    await Promise.all(jobs
+      .filter((queued) => queued.id?.startsWith(`inventory-snapshot-${merchantId}-`))
+      .map((queued) => queued.remove()))
     await prisma.merchant.deleteMany({ where: { shopifyDomain: shopDomain } })
     await prisma.$disconnect()
     await Promise.all([
@@ -155,6 +163,17 @@ describe.sequential('enrichment pipeline', () => {
     expect((raw.variants as Array<{ inventory_levels: unknown }>)[0]?.inventory_levels).toEqual(levels)
   })
 
+  it('never overwrites a newer stored revision with an older Shopify response', async () => {
+    const before = await enrichedRow()
+    fetchShopifyProductMock.mockResolvedValueOnce(product({
+      title: 'Outdated title',
+      updated_at: new Date(Date.now() - 86_400_000).toISOString(),
+    }))
+    const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
+    expect(result).toMatchObject({ skipped: 'stale' })
+    expect((await enrichedRow()).title).toBe(before.title)
+  })
+
   it('enriches again when the description changes', async () => {
     fetchShopifyProductMock.mockResolvedValueOnce(product({ body_html: '<p>Black leather sneaker.</p>' }))
     const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
@@ -164,6 +183,9 @@ describe.sequential('enrichment pipeline', () => {
 
   it('skips jobs once the shop has uninstalled the app', async () => {
     await prisma.merchant.update({ where: { id: merchantId }, data: { uninstalledAt: new Date() } })
+    // The real token helper raises this for an uninstalled or erased shop.
+    const { InactiveInstallError } = await import('../lib/shopify-token.js')
+    getValidShopifyAdminTokenMock.mockRejectedValueOnce(new InactiveInstallError(merchantId))
     const shopifyCallsBefore = fetchShopifyProductMock.mock.calls.length
     try {
       const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)

@@ -7,6 +7,8 @@ export const dashboardRedis = globalForRedis.capDashboardRedis ?? new Redis(
   {
     lazyConnect: true,
     maxRetriesPerRequest: 2,
+    // Fail within 2 s instead of stalling sign-ins on a hung connection.
+    commandTimeout: 2_000,
     enableReadyCheck: false,
   },
 )
@@ -42,7 +44,21 @@ const LOGIN_ATTEMPT_LIMITS = {
 
 export type DashboardLoginBucket = keyof typeof LOGIN_ATTEMPT_LIMITS
 
+// Limits fail open: a Redis outage must not turn a correct password into a
+// 500. Password verification itself still runs on every attempt.
 async function consumeDashboardAttempt(
+  redisKey: string,
+  limit: number,
+): Promise<DashboardAttemptResult> {
+  try {
+    return await countDashboardAttempt(redisKey, limit)
+  } catch (error) {
+    console.warn('[cap-dashboard] Attempt limiter unavailable, allowing request:', error instanceof Error ? error.message : error)
+    return { allowed: true, retryAfterSeconds: 0 }
+  }
+}
+
+async function countDashboardAttempt(
   redisKey: string,
   limit: number,
 ): Promise<DashboardAttemptResult> {
@@ -79,5 +95,7 @@ export async function clearDashboardLoginAttempts(
   bucket: DashboardLoginBucket,
   key: string,
 ): Promise<void> {
-  await dashboardRedis.del(`dashboard:login:${bucket}:${key}`)
+  await dashboardRedis.del(`dashboard:login:${bucket}:${key}`).catch((error: unknown) => {
+    console.warn('[cap-dashboard] Could not reset login attempts:', error instanceof Error ? error.message : error)
+  })
 }

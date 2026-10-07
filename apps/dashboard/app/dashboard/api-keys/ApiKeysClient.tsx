@@ -72,6 +72,10 @@ export default function ApiKeysClient({ keys, merchantDomain, role }: ApiKeysCli
           return
         }
         setApiKeys(prev => prev.filter(k => k.id !== id))
+        const result = await response.json().catch(() => ({})) as { effectiveWithinSeconds?: number }
+        if (result.effectiveWithinSeconds) {
+          setError(`Key revoked. It may keep working for up to ${result.effectiveWithinSeconds} seconds while caches expire.`)
+        }
       } catch {
         setError(NETWORK_ERROR_MESSAGE)
       }

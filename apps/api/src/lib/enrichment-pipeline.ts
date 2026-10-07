@@ -12,7 +12,7 @@ import { catalogSyncQueue, type EnrichmentJobData } from './queue.js'
 // ENRICHMENT PIPELINE (run by the enrichment worker)
 // ============================================================
 import { fetchShopifyProduct } from './shopify.js'
-import { getValidShopifyAdminToken, isMerchantInstallActive } from './shopify-token.js'
+import { InactiveInstallError, getValidShopifyAdminToken } from './shopify-token.js'
 import { invalidateMerchantSearchCache } from './redis.js'
 import { carryOverInventoryLevels } from './inventory.js'
 import { extractCommercePolicies, extractMerchantClaims } from './commerce-policies.js'
@@ -196,6 +196,7 @@ export interface EnrichmentJobContext {
 
 export type EnrichmentJobResult =
   | { skipped: 'merchant-inactive' }
+  | { productId: string; skipped: 'stale' }
   | { productId: string; skipped: 'inactive' }
   | { productId: string; geoScore: number; llm: boolean }
 
@@ -205,15 +206,16 @@ export async function runEnrichmentJob(
 ): Promise<EnrichmentJobResult> {
   const { shopDomain, shopifyProductId, merchantId } = data
 
-  if (!(await isMerchantInstallActive(merchantId))) {
+  console.log(`[Worker] Processing product ${shopifyProductId} for ${shopDomain}`)
+
+  let token: string
+  try {
+    token = await getValidShopifyAdminToken(merchantId)
+  } catch (error) {
+    if (!(error instanceof InactiveInstallError)) throw error
     console.log(`[Worker] Skipping product ${shopifyProductId}: ${shopDomain} is no longer installed`)
     return { skipped: 'merchant-inactive' }
   }
-
-  console.log(`[Worker] Processing product ${shopifyProductId} for ${shopDomain}`)
-
-  // Get merchant token
-  const token = await getValidShopifyAdminToken(merchantId)
 
   // Fetch latest product from Shopify
   const shopifyProduct = await fetchShopifyProduct(shopDomain, token, shopifyProductId)
@@ -229,8 +231,19 @@ export async function runEnrichmentJob(
   const rawKey = { merchantId, shopifyId: BigInt(shopifyProductId) }
   const existingRaw = await prisma.productRaw.findUnique({
     where: { merchantId_shopifyId: rawKey },
-    select: { variants: true },
+    select: { id: true, variants: true, shopifyUpdatedAt: true },
   })
+  // Jobs for one product can overlap (webhook bursts, full syncs). A response
+  // older than what is stored must not overwrite the newer revision.
+  const shopifyUpdatedAt = new Date(shopifyProduct.updated_at)
+  if (
+    existingRaw?.shopifyUpdatedAt &&
+    !Number.isNaN(shopifyUpdatedAt.getTime()) &&
+    existingRaw.shopifyUpdatedAt > shopifyUpdatedAt
+  ) {
+    console.log(`[Worker] Product ${shopifyProductId}: a newer revision is already stored, skipping`)
+    return { productId: existingRaw.id, skipped: 'stale' }
+  }
   const { variants, staleInventoryItemIds } = carryOverInventoryLevels(
     shopifyProduct.variants as unknown as Array<Record<string, unknown>>,
     existingRaw?.variants,
@@ -245,6 +258,7 @@ export async function runEnrichmentJob(
     images: shopifyProduct.images as unknown as Prisma.InputJsonValue,
     metafields: shopifyProduct.metafields as unknown as Prisma.InputJsonValue,
     status: shopifyProduct.status,
+    ...(!Number.isNaN(shopifyUpdatedAt.getTime()) && { shopifyUpdatedAt }),
   }
   const rawProduct = await prisma.productRaw.upsert({
     where: { merchantId_shopifyId: rawKey },
@@ -254,9 +268,10 @@ export async function runEnrichmentJob(
 
   await job.updateProgress(30)
 
-  // Drafts, archived and unlisted products must never reach agents. Search
-  // filters on products_raw.status, so persisting the status above hides
-  // the product immediately; skipping the LLM avoids paying for it.
+  // Draft, archived and unlisted products (Shopify status other than ACTIVE)
+  // must never reach agents. Search filters on products_raw.status, so
+  // persisting the status above hides the product immediately; skipping the
+  // LLM avoids paying for it. Sales-channel publication is not checked yet.
   if (shopifyProduct.status !== 'active') {
     await invalidateMerchantSearchCache(merchantId)
     await job.updateProgress(100)

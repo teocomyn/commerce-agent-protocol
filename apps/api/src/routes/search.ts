@@ -94,9 +94,11 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
   }
 
   // Relevance uses embeddings when available, with a lexical fallback so an
-  // OpenAI outage does not take product discovery offline.
+  // OpenAI outage does not take product discovery offline. Without Redis
+  // (no cache key) rate limiting fails open too, so the paid embedding call is
+  // skipped and lexical search is used until Redis is back.
   let embeddingStr: string | null = null
-  if (sort === 'relevance') {
+  if (sort === 'relevance' && cacheKey) {
     try {
       const embeddingResponse = await openai.embeddings.create({
         model: 'text-embedding-3-small',

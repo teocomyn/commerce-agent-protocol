@@ -5,6 +5,9 @@ import { isSameOriginMutation } from '@/lib/dashboard-session'
 import { isUuid, requireDashboardSession } from '@/lib/api-route'
 import { invalidateApiKeyCache } from '@/lib/redis'
 
+// Mirrors API_KEY_CACHE_TTL_SECONDS in apps/api/src/middleware/auth.ts.
+const API_KEY_CACHE_TTL_SECONDS = 60
+
 // DELETE /api/keys/[id] — revoke a key
 export async function DELETE(
   req: NextRequest,
@@ -36,15 +39,15 @@ export async function DELETE(
   try {
     await invalidateApiKeyCache(key.keyHash)
   } catch (error) {
-    // The revocation above is authoritative. The API caches successful key
-    // lookups in Redis for up to 5 minutes (apps/api/src/middleware/auth.ts),
-    // so without this invalidation the key can keep working until that entry
-    // expires. Reporting a failure here would only invite a retry of an
-    // already revoked key, so log it and report the revocation.
+    // The revocation above is authoritative, but the API caches successful
+    // key lookups for up to 60 s (API_KEY_CACHE_TTL_SECONDS in
+    // apps/api/src/middleware/auth.ts). Say so instead of claiming the key
+    // stopped working immediately.
     console.error(
       `[cap-dashboard] API key ${key.id} revoked, but its cache entry could not be invalidated: ${error instanceof Error ? error.message : String(error)}`,
     )
+    return NextResponse.json({ revoked: true, effectiveWithinSeconds: API_KEY_CACHE_TTL_SECONDS })
   }
 
-  return NextResponse.json({ revoked: true })
+  return NextResponse.json({ revoked: true, effectiveWithinSeconds: 0 })
 }

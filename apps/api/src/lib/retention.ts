@@ -1,4 +1,5 @@
-import { prisma } from '@cap/db'
+import { prisma, type Prisma } from '@cap/db'
+import { OUTCOME_UNKNOWN_BODY } from './checkout-idempotency.js'
 
 // ============================================================
 // DATA RETENTION
@@ -29,7 +30,11 @@ export async function runRetention(now = new Date()): Promise<RetentionResult> {
   const invitationCutoff = before(30)
 
   const [agentQueries, webhookEvents, loginTokens, invitations, abandonedCheckouts] = await Promise.all([
-    prisma.agentQuery.deleteMany({ where: { createdAt: { lt: agentQueryCutoff } } }),
+    // Rows without a merchant (its shop was erased, or pre-dating the
+    // merchant_id column) cannot be attributed or redacted later: drop them.
+    prisma.agentQuery.deleteMany({
+      where: { OR: [{ createdAt: { lt: agentQueryCutoff } }, { merchantId: null }] },
+    }),
     prisma.webhookEvent.deleteMany({
       where: { receivedAt: { lt: webhookCutoff }, status: { in: ['completed', 'failed'] } },
     }),
@@ -45,11 +50,15 @@ export async function runRetention(now = new Date()): Promise<RetentionResult> {
         ],
       },
     }),
-    // A crash between the row insert and the Shopify call leaves a row stuck
-    // in "creating"; releasing its idempotency key lets the client retry.
+    // A crash around the Shopify call leaves a row stuck in "creating". The
+    // cart may or may not exist, so the idempotency key is kept and replays
+    // an "outcome unknown" error telling the agent to use a new key.
     prisma.agentCheckout.updateMany({
       where: { status: 'creating', createdAt: { lt: before(1) } },
-      data: { status: 'failed', idempotencyKey: null },
+      data: {
+        status: 'failed',
+        response: { status: 409, body: OUTCOME_UNKNOWN_BODY } as unknown as Prisma.InputJsonValue,
+      },
     }),
   ])
 
@@ -67,12 +76,18 @@ export async function runRetention(now = new Date()): Promise<RetentionResult> {
  * after uninstall). Returns false when the shop is still installed: Shopify
  * never sends this topic for an active install, so it is treated as invalid.
  */
-export async function redactShop(merchantId: string): Promise<boolean> {
+export async function redactShop(
+  merchantId: string,
+): Promise<{ erased: false } | { erased: true; apiKeyHashes: string[] }> {
   const merchant = await prisma.merchant.findUnique({
     where: { id: merchantId },
-    select: { uninstalledAt: true, members: { select: { userId: true } } },
+    select: {
+      uninstalledAt: true,
+      members: { select: { userId: true } },
+      apiKeys: { select: { keyHash: true } },
+    },
   })
-  if (!merchant?.uninstalledAt) return false
+  if (!merchant?.uninstalledAt) return { erased: false }
 
   const memberIds = merchant.members.map((member) => member.userId)
   await prisma.$transaction([
@@ -83,7 +98,8 @@ export async function redactShop(merchantId: string): Promise<boolean> {
     // Accounts that only belonged to this shop.
     prisma.user.deleteMany({ where: { id: { in: memberIds }, memberships: { none: {} } } }),
   ])
-  return true
+  // The caller evicts these from the API key cache.
+  return { erased: true, apiKeyHashes: merchant.apiKeys.map((key) => key.keyHash) }
 }
 
 /** Shopify `customers/redact`: drop the order references CAP keeps. */

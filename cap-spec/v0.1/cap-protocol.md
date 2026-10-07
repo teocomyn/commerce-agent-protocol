@@ -81,7 +81,7 @@ Semantic + filtered product retrieval.
 - `query` **MUST** be present, 1–500 chars.
 - `sort` **MUST** be one of `relevance | price_asc | price_desc | geo_score`.
 - Servers **MUST** filter results to the calling merchant's catalog.
-- Servers **MUST** only return products the merchant currently offers for sale on the channel CAP serves (for example Shopify status `ACTIVE`); drafts, archived, unpublished and unlisted products are never exposed.
+- Servers **MUST** only return products the merchant currently offers for sale (for example Shopify status `ACTIVE`); draft, archived and unlisted products are never exposed. Servers **SHOULD** also exclude products not published to the sales channel they serve.
 - `certifications` **MUST** come from data declared by the merchant. Servers **MUST NOT** infer or generate certifications, labels or environmental claims.
 
 **Response body** — see `examples/search-response.json`. Each result **MUST** include a stable `id`, `merchant`, `price`, `availability`, and a `checkout_url` that points at the same server's checkout endpoint.
@@ -123,11 +123,12 @@ The CAP Server **MUST** persist enough state to reconcile the checkout against a
 
 **Idempotency.** Agents **SHOULD** send an `Idempotency-Key` header (1–255 characters of letters, digits, `_`, `-`, `.`, `:`) so that a retried request does not create a second checkout. A CAP Server that receives a key it already processed for the same merchant:
 
-- **MUST** return the first response unchanged, with the header `Idempotent-Replayed: true`, when the request body is identical;
+- **MUST** return the first outcome unchanged (success or error, same status and body), with the header `Idempotent-Replayed: true`, when the request body is identical;
 - **MUST** reject the request with `422 IDEMPOTENCY_KEY_REUSED` when the body differs;
-- **MUST** reject the request with `409 IDEMPOTENCY_KEY_IN_PROGRESS` while the first request is still running.
+- **MUST** reject the request with `409 IDEMPOTENCY_KEY_IN_PROGRESS` while the first request is still running;
+- **MUST** reject the request with `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` when the first request stopped before recording its outcome.
 
-A request that failed upstream (for example `502`) releases its key, so the agent may retry it with the same key.
+A key is never released. A failed or unknown first attempt may still have created a checkout upstream (for example after a timeout), so agents retry with a **new** key once they have decided to try again.
 
 ## 5. Errors
 

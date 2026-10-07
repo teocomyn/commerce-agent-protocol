@@ -36,8 +36,8 @@ export async function PATCH(
   const { role } = body.value
   const membership = await manageableMembership(id, session.merchantId, session.userId)
   if (!membership) return NextResponse.json({ error: 'Member not found' }, { status: 404 })
-  // Writing the membership bumps its updatedAt, which signs the member out.
-  await prisma.merchantMember.update({ where: { id }, data: { role } })
+  // A new role signs the member out of every device (session version bump).
+  await prisma.merchantMember.update({ where: { id }, data: { role, sessionVersion: { increment: 1 } } })
   return NextResponse.json({ updated: true, role })
 }
 
@@ -55,6 +55,9 @@ export async function DELETE(
   if (!isUuid(id)) return NextResponse.json({ error: 'Member not found' }, { status: 404 })
   const membership = await manageableMembership(id, session.merchantId, session.userId)
   if (!membership) return NextResponse.json({ error: 'Member not found' }, { status: 404 })
-  await prisma.merchantMember.update({ where: { id }, data: { revokedAt: new Date() } })
+  await prisma.merchantMember.update({
+    where: { id },
+    data: { revokedAt: new Date(), sessionVersion: { increment: 1 } },
+  })
   return NextResponse.json({ revoked: true })
 }

@@ -28,7 +28,9 @@ export function enrichmentSourceHash(source: EnrichmentSource): string {
     vendor: source.vendor,
     productType: source.productType,
     tags: source.tags,
-    images: source.images.slice(0, 3).map((image) => [image.src, image.alt]),
+    // Same text the prompt receives: a CDN URL change with an unchanged alt
+    // text must not trigger a new (paid) enrichment.
+    images: source.images.slice(0, 3).map((image) => image.alt ?? image.src),
   })).digest('hex')
 }
 

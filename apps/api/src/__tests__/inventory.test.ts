@@ -92,6 +92,15 @@ describe('product re-sync', () => {
     expect(result.staleInventoryItemIds).toEqual([])
   })
 
+  it('ignores malformed stored levels', () => {
+    const result = carryOverInventoryLevels(
+      [{ inventory_item_id: 9001, inventory_quantity: 5, inventory_management: 'shopify', inventory_levels: [] }],
+      [{ inventory_item_id: 9001, inventory_levels: [null, 'x', { available: 3 }, { location_id: 10, available: 5 }] }],
+    )
+    expect(result.variants[0]?.['inventory_levels']).toEqual([{ location_id: 10, available: 5 }])
+    expect(result.staleInventoryItemIds).toEqual([])
+  })
+
   it('flags items whose levels are missing or no longer add up', () => {
     const result = carryOverInventoryLevels(
       [
@@ -103,5 +112,16 @@ describe('product re-sync', () => {
     )
     expect(result.variants[0]?.['inventory_levels']).toEqual(levels)
     expect(result.staleInventoryItemIds).toEqual(['9001', '9002'])
+  })
+})
+
+describe('inventory webhook before the first snapshot', () => {
+  it('uses the location quantity as a lower bound instead of zeroing the stock', () => {
+    const variants = applyInventoryLevelUpdate([{
+      inventory_item_id: 9001,
+      inventory_quantity: 12,
+      inventory_levels: [],
+    }], '9001', '10', 4)
+    expect(variants[0]).toMatchObject({ inventory_quantity: 4, inventory_stale: true })
   })
 })

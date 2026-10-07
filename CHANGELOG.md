@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Authoritative Shopify inventory snapshots with per-location quantities.
 - Shopify shipping and refund policy URLs in search and comparison responses.
 - Variant-level prices, quantities, and availability in search responses.
-- `Idempotency-Key` header on `POST /v1/checkout/initiate`: retries replay the first response (`Idempotent-Replayed: true`) instead of creating another cart.
+- `Idempotency-Key` header on `POST /v1/checkout/initiate`: retries replay the first outcome, success or error (`Idempotent-Replayed: true`), instead of creating another cart; keys are never released.
 - Shopify GDPR compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) and a daily retention job (agent queries 180 days, webhook receipts 30 days, expired tokens and invitations).
 - Graceful shutdown on `SIGTERM` for the API and both workers; containers run `node` as PID 1.
 
@@ -23,6 +23,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Inventory snapshots are scheduled after a product row exists, and product re-syncs keep per-location inventory levels.
 - Search cache invalidation bumps a per-merchant generation instead of scanning the Redis keyspace.
 - Every Render service runs migrations before starting.
+- Enrichment jobs never overwrite a newer stored product revision (`products_raw.shopify_updated_at`), and inventory webhooks that arrive before the first per-location snapshot no longer zero the stock.
+- Dashboard sessions are versioned by an atomic `merchant_members.session_version` counter; a routine Shopify re-authorization no longer signs the owner out.
 - The API Redis client fails fast during an outage; rate limiting fails open and `/ready` reports the outage.
 
 ### Fixed

@@ -204,7 +204,7 @@ async function processWebhook(args: {
         }),
         prisma.merchantMember.updateMany({
           where: { merchantId, revokedAt: null },
-          data: { revokedAt: now },
+          data: { revokedAt: now, sessionVersion: { increment: 1 } },
         }),
         // Otherwise a reinstall would make old invitation links valid again.
         prisma.merchantInvitation.updateMany({
@@ -258,10 +258,17 @@ async function processWebhook(args: {
     }
 
     case 'shop/redact': {
-      const deleted = await redactShop(merchantId)
-      if (!deleted) {
-        console.warn(`[Webhook] Ignoring shop/redact for installed shop ${shopDomain}`)
-        break
+      const result = await redactShop(merchantId)
+      if (!result.erased) {
+        // Shopify only sends shop/redact 48 h after an uninstall, so the
+        // app/uninstalled webhook was missed or not processed yet. Failing
+        // keeps a durable failed event and makes Shopify redeliver, instead
+        // of silently skipping the erasure.
+        throw new Error(`shop/redact received for ${shopDomain}, which is not marked uninstalled`)
+      }
+      if (result.apiKeyHashes.length > 0) {
+        await redis.del(...result.apiKeyHashes.flatMap((hash) => [`apikey:${hash}`, `rl:${hash}`]))
+          .catch((error: unknown) => console.error('[Webhook] API key cache eviction failed:', error))
       }
       await invalidateMerchantSearchCache(merchantId)
       return { merchantDeleted: true }

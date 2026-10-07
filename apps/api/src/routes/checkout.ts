@@ -11,6 +11,11 @@ import {
   ShopifyCartError,
 } from '../lib/shopify.js'
 import { capJsonValidator } from '../lib/validation.js'
+import {
+  IDEMPOTENCY_IN_PROGRESS_MS,
+  OUTCOME_UNKNOWN_BODY,
+  storedOutcome,
+} from '../lib/checkout-idempotency.js'
 import { isVariantPurchasable } from '../lib/inventory.js'
 import { supportsShippingCountry } from '../lib/commerce-policies.js'
 
@@ -36,10 +41,12 @@ interface CheckoutInitiateResponse {
   expires_at: string
 }
 
-// Idempotency-Key: same key + same body replays the first response instead of
-// creating a second Shopify cart; same key + different body is rejected.
+// Idempotency-Key: same key + same body replays the first outcome (success or
+// error) instead of creating a second Shopify cart; same key + different body
+// is rejected. Keys are never released: after a failure, or when the outcome
+// is unknown (crash or timeout around the Shopify call), the agent retries
+// with a new key. Reusing the key could otherwise create a second cart.
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_.:-]{1,255}$/
-
 function replayIdempotentCheckout(c: Context, previous: AgentCheckout, requestHash: string) {
   if (previous.requestHash !== requestHash) {
     return c.json<CAPError>({
@@ -49,9 +56,13 @@ function replayIdempotentCheckout(c: Context, previous: AgentCheckout, requestHa
       },
     }, 422)
   }
-  if (previous.response) {
+  const outcome = storedOutcome(previous.response)
+  if (outcome) {
     c.header('Idempotent-Replayed', 'true')
-    return c.json(previous.response as unknown as CheckoutInitiateResponse)
+    return c.json(outcome.body as CAPError, outcome.status)
+  }
+  if (Date.now() - previous.createdAt.getTime() > IDEMPOTENCY_IN_PROGRESS_MS) {
+    return c.json<CAPError>(OUTCOME_UNKNOWN_BODY, 409)
   }
   return c.json<CAPError>({
     error: {
@@ -213,10 +224,16 @@ checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async
   } catch (error) {
     // A concurrent request with the same Idempotency-Key won the race.
     if (idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      const previous = await prisma.agentCheckout.findUniqueOrThrow({
+      const previous = await prisma.agentCheckout.findUnique({
         where: { merchantId_idempotencyKey: { merchantId: auth.merchantId, idempotencyKey } },
       })
-      return replayIdempotentCheckout(c, previous, requestHash)
+      if (previous) return replayIdempotentCheckout(c, previous, requestHash)
+      return c.json<CAPError>({
+        error: {
+          code: 'IDEMPOTENCY_KEY_IN_PROGRESS',
+          message: 'A checkout with this Idempotency-Key is still being created; retry shortly',
+        },
+      }, 409)
     }
     throw error
   }
@@ -232,22 +249,31 @@ checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async
       trackingToken,
     })
   } catch (err) {
-    // Releasing the key lets the client retry the same request after an
-    // upstream failure.
-    await prisma.agentCheckout.update({
-      where: { id: agentCheckout.id },
-      data: { status: 'failed', idempotencyKey: null },
-    }).catch(() => undefined)
     const userErrors =
       err instanceof ShopifyCartError ? err.userErrors : undefined
-    return c.json<CAPError>({
+    const errorBody: CAPError = {
       error: {
         code: 'CHECKOUT_FAILED',
         message:
           err instanceof Error ? err.message : 'Failed to create Shopify cart',
         details: userErrors,
       },
-    }, 502)
+    }
+    // The error is stored for replay and the key stays taken: a timeout may
+    // still have created the cart, so retrying under the same key is unsafe.
+    // If this write fails, the replay reports an unknown outcome instead.
+    await prisma.agentCheckout.update({
+      where: { id: agentCheckout.id },
+      data: {
+        status: 'failed',
+        ...(idempotencyKey && {
+          response: { status: 502, body: errorBody } as unknown as Prisma.InputJsonValue,
+        }),
+      },
+    }).catch((updateError: unknown) => {
+      console.error('[Checkout] Failed to record checkout failure:', updateError)
+    })
+    return c.json<CAPError>(errorBody, 502)
   }
 
   // 5. Attach the upstream cart to the pre-created checkout record.
@@ -280,7 +306,9 @@ checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async
       status: 'pending',
       amount: Number.isFinite(totalAmount) ? totalAmount : null,
       currency: cart.currency,
-      ...(idempotencyKey && { response: response as unknown as Prisma.InputJsonValue }),
+      ...(idempotencyKey && {
+        response: { status: 200, body: response } as unknown as Prisma.InputJsonValue,
+      }),
     },
   })
 
