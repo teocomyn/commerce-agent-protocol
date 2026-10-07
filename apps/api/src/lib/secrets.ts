@@ -25,11 +25,35 @@ export function decodeCanonicalKey(raw: string): Buffer | null {
 }
 
 // Random output of `openssl rand -hex 32` has 16 distinct characters, base64
-// even more; '1234…' or 'a'.repeat(32) is not a secret.
+// even more; '1234…', 'a'.repeat(32) or a short block repeated is not a secret.
 const MIN_DISTINCT_CHARACTERS = 12
 
-function isTriviallyGuessable(value: string): boolean {
-  return new Set(value).size < MIN_DISTINCT_CHARACTERS
+// True when the text is a block of at most half its length, repeated.
+function isRepeatedBlock(value: string): boolean {
+  for (let period = 1; period <= value.length / 2; period++) {
+    let repeats = true
+    for (let index = period; index < value.length && repeats; index++) {
+      repeats = value[index] === value[index - period]
+    }
+    if (repeats) return true
+  }
+  return false
+}
+
+// 32 random bytes hold about 30 distinct values and no arithmetic run; hex or
+// base64 of 0x00..0x1f or of one repeated byte decodes to a guessable key.
+function isWeakKeyMaterial(key: Buffer): boolean {
+  if (new Set(key).size < 16) return true
+  const step = (key[1]! - key[0]! + 256) % 256
+  return key.every((byte, index) => index === 0 || (byte - key[index - 1]! + 256) % 256 === step)
+}
+
+function isTriviallyGuessable(raw: string): boolean {
+  // Checked on the value that is actually used: decoding trims whitespace.
+  const value = raw.trim()
+  const decoded = decodeCanonicalKey(value)
+  if (decoded && isWeakKeyMaterial(decoded)) return true
+  return new Set(value).size < MIN_DISTINCT_CHARACTERS || isRepeatedBlock(value)
 }
 
 let legacyKeyWarningShown = false
@@ -90,6 +114,11 @@ export function assertRuntimeSecrets(
 
   if (mode !== 'mcp') {
     const operationsToken = env['CAP_OPERATIONS_TOKEN']
+    // Workers never serve the operations endpoints; the production API must
+    // have the token, or every /internal/operations call answers 503.
+    if (production && mode === 'http' && !operationsToken?.trim()) {
+      errors.push('CAP_OPERATIONS_TOKEN must be set in production (`openssl rand -hex 32`).')
+    }
     if (operationsToken && (
       operationsToken.length < 32 || isPlaceholderSecret(operationsToken) || isTriviallyGuessable(operationsToken)
     )) {
@@ -99,6 +128,12 @@ export function assertRuntimeSecrets(
     const shopifySecret = env['SHOPIFY_API_SECRET']?.trim()
     if (production && (!shopifySecret || isPlaceholderSecret(shopifySecret))) {
       errors.push('SHOPIFY_API_SECRET must be set to the Shopify app secret in production.')
+    }
+    // Sent as client_id on install and token refresh: an example value only
+    // fails once Shopify rejects the first install.
+    const shopifyKey = env['SHOPIFY_API_KEY']?.trim()
+    if (production && (!shopifyKey || isPlaceholderSecret(shopifyKey))) {
+      errors.push('SHOPIFY_API_KEY must be set to the Shopify app client id in production.')
     }
   }
 

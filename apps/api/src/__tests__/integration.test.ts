@@ -10,7 +10,7 @@ import { checkoutRouter } from '../routes/checkout.js'
 import { oauthRouter } from '../routes/shopify/oauth.js'
 import { CAP_WEBHOOK_TOPICS, decryptToken, encryptToken } from '../lib/shopify.js'
 import { redis } from '../lib/redis.js'
-import { catalogSyncQueue, deadLetterQueue, enrichmentQueue } from '../lib/queue.js'
+import { catalogSyncQueue, deadLetterQueue, enrichmentQueue, queueFullCatalogSync } from '../lib/queue.js'
 import { getValidShopifyAdminToken } from '../lib/shopify-token.js'
 import { checkReadiness, operationsRouter } from '../routes/operations.js'
 
@@ -628,10 +628,19 @@ describe.sequential('CAP integration boundaries', () => {
       const jobs = await catalogSyncQueue.getJobs(['waiting', 'prioritized', 'delayed'])
       expect(jobs.some((job) => job.id?.startsWith(`operations-resync-${merchantA}-`))).toBe(true)
 
-      // A second confirmation while those jobs wait does not queue them twice.
-      expect((await request({ confirm: true })).status).toBe(200)
+      // A second confirmation while those jobs wait does not queue them twice,
+      // and says so.
+      const retry = await request({ confirm: true })
+      expect(retry.status).toBe(200)
+      expect(await retry.json()).toMatchObject({ ignored: queued })
       const afterRetry = await catalogSyncQueue.getJobs(['waiting', 'prioritized', 'delayed'])
-      expect(afterRetry.filter((job) => job.id?.startsWith(`operations-resync-${merchantA}-`))).toHaveLength(1)
+      const merchantAJobs = afterRetry.filter((job) => job.id?.startsWith(`operations-resync-${merchantA}-`))
+      expect(merchantAJobs).toHaveLength(1)
+
+      // Removing the waiting job releases the shop: it can be queued again.
+      await merchantAJobs[0]!.remove()
+      expect(await queueFullCatalogSync(merchantA, domains[0]!, { jobId: `operations-resync-${merchantA}-again` }))
+        .toBe(true)
     } finally {
       delete process.env.CAP_OPERATIONS_TOKEN
       // The fake stores must never reach a running catalog worker.

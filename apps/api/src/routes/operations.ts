@@ -5,6 +5,7 @@ import {
   deadLetterQueue,
   enrichmentQueue,
   getQueueStats,
+  queueFullCatalogSync,
 } from '../lib/queue.js'
 import { redis } from '../lib/redis.js'
 import {
@@ -128,17 +129,15 @@ operationsRouter.post('/catalog-sync', async (c) => {
     select: { id: true, shopifyDomain: true },
   })
   const requestedAt = Date.now()
-  // Deduplicated per merchant while a resync is still waiting or running, so
-  // a double submission does not run two overlapping full syncs.
-  await catalogSyncQueue.addBulk(merchants.map((merchant) => ({
-    name: 'full-catalog-sync',
-    data: { merchantId: merchant.id, shopDomain: merchant.shopifyDomain },
-    opts: {
-      jobId: `operations-resync-${merchant.id}-${requestedAt}`,
-      deduplication: { id: `operations-resync-${merchant.id}` },
-    },
-  })))
-  return c.json({ queued: merchants.length })
+  // A shop whose full sync (from any producer) is still waiting or running is
+  // not queued again; it is reported as ignored.
+  const results = await Promise.all(merchants.map((merchant) => queueFullCatalogSync(
+    merchant.id,
+    merchant.shopifyDomain,
+    { jobId: `operations-resync-${merchant.id}-${requestedAt}` },
+  )))
+  const queued = results.filter(Boolean).length
+  return c.json({ queued, ignored: results.length - queued })
 })
 
 operationsRouter.get('/metrics', async (c) => {

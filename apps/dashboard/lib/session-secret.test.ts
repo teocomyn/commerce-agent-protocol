@@ -17,6 +17,22 @@ describe('dashboard session secret validation', () => {
     expect(validateDashboardSessionSecret(secret)).toBe(secret)
   })
 
+  it('applies the length and distinct-character bounds exactly', () => {
+    // 32 characters, exactly 12 distinct ones, no repeated block.
+    const exactly32 = 'abcdefghijklbadcfehgjilkacegikbd'
+    expect(new Set(exactly32).size).toBe(12)
+    expect(validateDashboardSessionSecret(exactly32)).toBe(exactly32)
+    expect(() => validateDashboardSessionSecret(exactly32.slice(0, 31))).toThrow(/32 characters/)
+    // 11 distinct characters, no repeated block.
+    const elevenDistinct = 'abcdefghijkbadcfehgjikacegikbdfh'
+    expect(new Set(elevenDistinct).size).toBe(11)
+    expect(() => validateDashboardSessionSecret(elevenDistinct)).toThrow(/trivially guessable/)
+  })
+
+  it('rejects a short block repeated, whatever its distinct characters', () => {
+    expect(() => validateDashboardSessionSecret('abcdefghijkl'.repeat(3))).toThrow(/repeated pattern/)
+  })
+
   it('rejects missing and short secrets with a generation hint', () => {
     expect(() => validateDashboardSessionSecret(undefined)).toThrow(/32 characters/)
     expect(() => validateDashboardSessionSecret('')).toThrow(/32 characters/)
@@ -33,6 +49,7 @@ describe('dashboard session secret validation', () => {
     'prefix-change_me-suffix-0123456789abcdef0123456789',
     'your_dashboard_session_secret_with_enough_length',
     'YOUR_SECRET_HERE_0123456789abcdef0123456789abcdef',
+    'replace-with-a-random-dashboard-session-secret-0123',
   ])('rejects placeholder-looking secret %s', (secret) => {
     expect(() => validateDashboardSessionSecret(secret)).toThrow(/openssl rand -hex 32/)
   })

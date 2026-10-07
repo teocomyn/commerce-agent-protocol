@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { configuredDashboardOrigin, validateDashboardUrl } from './public-origin'
 
 vi.mock('next/headers', () => ({ cookies: vi.fn() }))
@@ -13,6 +13,11 @@ function restore() {
 }
 
 describe('dashboard public origin', () => {
+  // The defaults read process.env: start every test without DASHBOARD_URL so
+  // the missing-value paths do not depend on the runner's environment.
+  beforeEach(() => {
+    delete process.env.DASHBOARD_URL
+  })
   afterEach(restore)
 
   it('parses DASHBOARD_URL into an origin', () => {
@@ -40,6 +45,8 @@ describe('dashboard public origin', () => {
       headers: { origin: 'https://attacker.example', 'x-forwarded-host': 'attacker.example', 'x-forwarded-proto': 'https' },
     })
     expect(isSameOriginMutation(forged)).toBe(false)
+    // No Origin header at all: also rejected in production.
+    expect(isSameOriginMutation(new Request('http://internal:3001/api/keys', { method: 'POST' }))).toBe(false)
 
     process.env.DASHBOARD_URL = 'https://dashboard.example.test'
     expect(isSameOriginMutation(forged)).toBe(false)

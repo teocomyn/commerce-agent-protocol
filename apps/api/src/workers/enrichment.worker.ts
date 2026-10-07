@@ -83,7 +83,7 @@ async function enrichProduct(
   const content = response.choices[0]?.message?.content
   if (!content) throw new Error('Empty LLM response')
 
-  return normalizeLlmEnrichment(LlmEnrichmentSchema.parse(JSON.parse(content)))
+  return normalizeLlmEnrichment(LlmEnrichmentSchema.parse(JSON.parse(content)), title)
 }
 
 // ============================================================

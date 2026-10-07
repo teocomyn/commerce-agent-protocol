@@ -58,7 +58,7 @@ describe('LLM enrichment output', () => {
       summary: 'A cotton T-shirt.',
     })
     const normalized = normalizeLlmEnrichment(output)
-    expect(normalized.specs).toEqual({ weight_g: 180, eco_label: true })
+    expect(normalized.specs).toEqual({ weight_g: 180 })
     expect(normalized.use_cases).toEqual(['everyday wear'])
     expect(normalized.target_audience).toEqual(['adults'])
   })
@@ -80,6 +80,26 @@ describe('LLM enrichment output', () => {
 
     const claimOnly = normalizeLlmEnrichment({ ...output, care_info: 'Certified organic.' })
     expect(claimOnly.care_info).toBeUndefined()
+  })
+
+  it('keeps claim-free lines and levels, and falls back to the merchant title', () => {
+    const output = LlmEnrichmentSchema.parse({
+      category: 'Organic > Apparel > Tops',
+      subcategory: 'Certified tees',
+      specs: [],
+      use_cases: [],
+      target_audience: [],
+      care_info: 'Machine wash cold\nGOTS certified fabric\nDo not tumble dry',
+      size_guide: [{ size: 'M', measurements: '50 cm' }, { size: 'Eco label', measurements: 'n/a' }],
+      summary: 'A certified organic cotton tee.',
+    })
+    const normalized = normalizeLlmEnrichment(output, 'Relaxed cotton tee')
+    expect(normalized.category).toBe('Apparel > Tops')
+    expect(normalized.subcategory).toBe('')
+    expect(normalized.care_info).toBe('Machine wash cold\nDo not tumble dry')
+    expect(normalized.size_guide).toEqual({ M: '50 cm' })
+    expect(normalized.summary).toBe('Relaxed cotton tee')
+    expect(normalizeLlmEnrichment({ ...output, category: 'Organic' }).category).toBe('Other')
   })
 
   it('normalizes array-shaped specs and size guides', () => {

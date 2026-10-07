@@ -41,6 +41,10 @@ export async function POST(req: NextRequest) {
   }
   const rawToken = req.cookies.get(OWNER_LOGIN_COOKIE)?.value ?? ''
   const body = await req.json().catch(() => null) as { merchantId?: unknown } | null
+  // A broken request is not "another store connected": answer it as such.
+  if (typeof body?.merchantId !== 'string') {
+    return NextResponse.json({ error: 'Invalid sign-in request. Reload this page and try again.' }, { status: 400 })
+  }
 
   const now = new Date()
   const loginToken = await findPendingOwnerLoginToken(rawToken, now)
@@ -50,7 +54,7 @@ export async function POST(req: NextRequest) {
   // Another Shopify connection in this browser may have replaced the handoff
   // cookie since the page was rendered: never sign in to a store other than
   // the one the owner just confirmed.
-  if (body?.merchantId !== loginToken.merchantId) {
+  if (body.merchantId !== loginToken.merchantId) {
     return NextResponse.json({
       error: 'Another store was connected in this browser. Reload this page to confirm that store.',
     }, { status: 409 })

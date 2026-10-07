@@ -12,7 +12,7 @@ import {
   validateGrantedScopes,
   verifyShopifyOAuthHmac,
 } from '../../lib/shopify.js'
-import { catalogSyncQueue } from '../../lib/queue.js'
+import { queueFullCatalogSync } from '../../lib/queue.js'
 import { redis } from '../../lib/redis.js'
 
 const oauthRouter = new Hono()
@@ -149,11 +149,8 @@ oauthRouter.get('/callback', async (c) => {
     update: { role: 'OWNER', revokedAt: null },
   })
 
-  // Trigger full catalog sync
-  await catalogSyncQueue.add('full-catalog-sync', {
-    merchantId: merchant.id,
-    shopDomain: shop,
-  })
+  // Trigger full catalog sync (ignored if one is already waiting or running)
+  await queueFullCatalogSync(merchant.id, shop, { jobId: `install-sync-${merchant.id}-${Date.now()}` })
 
   console.log(`[OAuth] Merchant ${shop} connected. Catalog sync triggered.`)
 

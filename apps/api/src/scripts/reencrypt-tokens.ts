@@ -62,4 +62,5 @@ for (const listed of merchants) {
 console.log(`[Reencrypt] ${reencrypted} merchant(s) re-encrypted, ${failures.length} failure(s)`)
 for (const failure of failures) console.error(`[Reencrypt] ${failure}`)
 await prisma.$disconnect()
-process.exit(failures.length > 0 ? 1 : 0)
+// exitCode, not process.exit(): the failure list must be fully written first.
+process.exitCode = failures.length > 0 ? 1 : 0
