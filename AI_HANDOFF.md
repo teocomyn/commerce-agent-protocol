@@ -21,7 +21,7 @@ Also fixed while there: OpenAI strict structured-output schema (the previous one
 
 ## Validation
 
-- `pnpm lint`: 4/4 packages pass. `pnpm build`: 5/5 pass.
+- `pnpm lint`: 4/4 packages pass. `pnpm build`: 5/5 pass. `pnpm audit --prod`: no known vulnerabilities after the dependency bump (CI audit step was failing on new advisories).
 - `pnpm test` against a throwaway pgvector Postgres + Redis (Docker): API 96/96 (incl. 17 integration tests, new draft-visibility test), dashboard 24/24.
 - `pnpm db:check-drift`: passes on a freshly migrated DB and fails on an injected schema change.
 - MCP stdio smoke test: stdout contains only JSON-RPC responses; tools/list returns the 3 tools.

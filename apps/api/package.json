@@ -24,12 +24,12 @@
   "dependencies": {
     "@cap/db": "workspace:*",
     "@cap/shared": "workspace:*",
-    "@hono/node-server": "^1.19.15",
+    "@hono/node-server": "^1.19.17",
     "@hono/zod-validator": "^0.7.6",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@prisma/client": "^5.22.0",
     "bullmq": "^5.76.4",
-    "hono": "^4.13.1",
+    "hono": "^4.13.13",
     "ioredis": "^5.4.0",
     "openai": "^4.57.0",
     "zod": "^3.23.0"

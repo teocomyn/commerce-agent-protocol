@@ -28,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Processes refuse to start with `.env.example` secrets. Production requires a 32-byte `ENCRYPTION_KEY` (hex or base64); new tokens use the `v2:` ciphertext format and `ENCRYPTION_KEY_PREVIOUS` supports rotation.
 - Invitation acceptance no longer verifies passwords of existing accounts (it requires a session of the invited user instead) and is rate limited per IP and per invitation.
 - Owner sign-in after Shopify OAuth goes through a same-origin confirmation step, closing login CSRF.
+- Dependency updates clearing every `pnpm audit --prod` finding (3 critical, 9 high): Next.js 15.5.27, MCP SDK 1.32.1, Hono 4.13.13, and patched `sharp`, `fast-uri`, `proxy-addr`, `qs`, `ip-address`, `postcss`, `source-map-js` overrides.
 - Dashboard sends CSP `frame-ancestors 'none'`, HSTS (production), `nosniff`, referrer and permissions policies; the unused `/api/cap` proxy is removed.
 
 ### Protocol
