@@ -1,5 +1,5 @@
 import OpenAI from 'openai'
-import { prisma, type Prisma } from '@cap/db'
+import { Prisma, prisma } from '@cap/db'
 import {
   computeGeoScore,
   stripHtml,
@@ -233,17 +233,8 @@ export async function runEnrichmentJob(
     where: { merchantId_shopifyId: rawKey },
     select: { id: true, variants: true, shopifyUpdatedAt: true },
   })
-  // Jobs for one product can overlap (webhook bursts, full syncs). A response
-  // older than what is stored must not overwrite the newer revision.
   const shopifyUpdatedAt = new Date(shopifyProduct.updated_at)
-  if (
-    existingRaw?.shopifyUpdatedAt &&
-    !Number.isNaN(shopifyUpdatedAt.getTime()) &&
-    existingRaw.shopifyUpdatedAt > shopifyUpdatedAt
-  ) {
-    console.log(`[Worker] Product ${shopifyProductId}: a newer revision is already stored, skipping`)
-    return { productId: existingRaw.id, skipped: 'stale' }
-  }
+  const knownRevision = !Number.isNaN(shopifyUpdatedAt.getTime())
   const { variants, staleInventoryItemIds } = carryOverInventoryLevels(
     shopifyProduct.variants as unknown as Array<Record<string, unknown>>,
     existingRaw?.variants,
@@ -258,13 +249,42 @@ export async function runEnrichmentJob(
     images: shopifyProduct.images as unknown as Prisma.InputJsonValue,
     metafields: shopifyProduct.metafields as unknown as Prisma.InputJsonValue,
     status: shopifyProduct.status,
-    ...(!Number.isNaN(shopifyUpdatedAt.getTime()) && { shopifyUpdatedAt }),
+    ...(knownRevision && { shopifyUpdatedAt }),
   }
-  const rawProduct = await prisma.productRaw.upsert({
-    where: { merchantId_shopifyId: rawKey },
-    create: { ...rawKey, ...rawFields },
-    update: { ...rawFields, syncedAt: new Date() },
-  })
+
+  // Jobs for one product can overlap (webhook bursts, full syncs). The
+  // revision check is part of the write, so of two overlapping jobs the one
+  // carrying the older Shopify response can never land last.
+  const notNewer: Prisma.ProductRawWhereInput = knownRevision
+    ? { OR: [{ shopifyUpdatedAt: null }, { shopifyUpdatedAt: { lte: shopifyUpdatedAt } }] }
+    : {}
+  const guardedUpdate = async () => (await prisma.productRaw.updateMany({
+    where: { ...rawKey, ...notNewer },
+    data: { ...rawFields, syncedAt: new Date() },
+  })).count === 1
+  let rawProductId = existingRaw?.id
+  let written: boolean
+  if (rawProductId) {
+    written = await guardedUpdate()
+  } else {
+    try {
+      rawProductId = (await prisma.productRaw.create({ data: { ...rawKey, ...rawFields }, select: { id: true } })).id
+      written = true
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) throw error
+      // A concurrent job created the row first: apply the same guarded update.
+      written = await guardedUpdate()
+      rawProductId = (await prisma.productRaw.findUniqueOrThrow({
+        where: { merchantId_shopifyId: rawKey },
+        select: { id: true },
+      })).id
+    }
+  }
+  if (!written) {
+    console.log(`[Worker] Product ${shopifyProductId}: a newer revision is already stored, skipping`)
+    return { productId: rawProductId, skipped: 'stale' }
+  }
+  const rawProduct = { id: rawProductId }
 
   await job.updateProgress(30)
 

@@ -174,6 +174,22 @@ describe.sequential('enrichment pipeline', () => {
     expect((await enrichedRow()).title).toBe(before.title)
   })
 
+  it('lets only the newest of two overlapping responses land', async () => {
+    const newer = new Date(Date.now() + 60_000).toISOString()
+    const older = new Date(Date.now() + 30_000).toISOString()
+    fetchShopifyProductMock
+      .mockResolvedValueOnce(product({ title: 'Newest title', updated_at: newer }))
+      .mockResolvedValueOnce(product({ title: 'Older title', updated_at: older }))
+    const results = await Promise.all([
+      runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job),
+      runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job),
+    ])
+    expect((await enrichedRow()).title).toBe('Newest title')
+    expect(results.filter((result) => 'skipped' in result && result.skipped === 'stale').length).toBeLessThanOrEqual(1)
+    // Later tests send current timestamps; forget the future revision.
+    await prisma.productRaw.updateMany({ where: { merchantId }, data: { shopifyUpdatedAt: null } })
+  })
+
   it('enriches again when the description changes', async () => {
     fetchShopifyProductMock.mockResolvedValueOnce(product({ body_html: '<p>Black leather sneaker.</p>' }))
     const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
