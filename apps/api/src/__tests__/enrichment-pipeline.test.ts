@@ -86,6 +86,15 @@ function product(overrides: Partial<ShopifyProduct> = {}): ShopifyProduct {
 
 const job = { id: 'test-job', updateProgress: async () => undefined }
 
+// Each test starts from a known state: no product, or the product enriched
+// once from product(). Mock call counts are reset after seeding.
+async function seedEnrichedProduct() {
+  fetchShopifyProductMock.mockResolvedValueOnce(product())
+  await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'create' }, job)
+  chatCreateMock.mockClear()
+  embeddingsCreateMock.mockClear()
+}
+
 async function enrichedRow() {
   const raw = await prisma.productRaw.findUniqueOrThrow({
     where: { merchantId_shopifyId: { merchantId, shopifyId: BigInt(shopifyProductId) } },
@@ -102,11 +111,13 @@ describe.sequential('enrichment pipeline', () => {
     merchantId = merchant.id
   })
 
-  beforeEach(() => {
+  beforeEach(async () => {
     chatCreateMock.mockClear()
     embeddingsCreateMock.mockClear()
     // Drop call history and any product queued by a test that failed early.
     fetchShopifyProductMock.mockReset()
+    await prisma.productRaw.deleteMany({ where: { merchantId } })
+    await prisma.merchant.update({ where: { id: merchantId }, data: { uninstalledAt: null } })
   })
 
   afterAll(async () => {
@@ -139,6 +150,7 @@ describe.sequential('enrichment pipeline', () => {
   })
 
   it('refreshes prices without calling the LLM when the content is unchanged', async () => {
+    await seedEnrichedProduct()
     fetchShopifyProductMock.mockResolvedValueOnce(product({
       variants: [{ ...product().variants[0]!, price: '95.00' }],
     }))
@@ -152,6 +164,7 @@ describe.sequential('enrichment pipeline', () => {
   })
 
   it('keeps known inventory levels across a product re-sync', async () => {
+    await seedEnrichedProduct()
     const levels = [{ location_id: 10, location_name: 'Paris', available: 5 }]
     await prisma.productRaw.update({
       where: { merchantId_shopifyId: { merchantId, shopifyId: BigInt(shopifyProductId) } },
@@ -164,6 +177,7 @@ describe.sequential('enrichment pipeline', () => {
   })
 
   it('never overwrites a newer stored revision with an older Shopify response', async () => {
+    await seedEnrichedProduct()
     const before = await enrichedRow()
     fetchShopifyProductMock.mockResolvedValueOnce(product({
       title: 'Outdated title',
@@ -175,6 +189,7 @@ describe.sequential('enrichment pipeline', () => {
   })
 
   it('lets only the newest of two overlapping responses land', async () => {
+    await seedEnrichedProduct()
     const newer = new Date(Date.now() + 60_000).toISOString()
     const older = new Date(Date.now() + 30_000).toISOString()
     fetchShopifyProductMock
@@ -186,11 +201,10 @@ describe.sequential('enrichment pipeline', () => {
     ])
     expect((await enrichedRow()).title).toBe('Newest title')
     expect(results.filter((result) => 'skipped' in result && result.skipped === 'stale').length).toBeLessThanOrEqual(1)
-    // Later tests send current timestamps; forget the future revision.
-    await prisma.productRaw.updateMany({ where: { merchantId }, data: { shopifyUpdatedAt: null } })
   })
 
   it('enriches again when the description changes', async () => {
+    await seedEnrichedProduct()
     fetchShopifyProductMock.mockResolvedValueOnce(product({ body_html: '<p>Black leather sneaker.</p>' }))
     const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
     expect(result).toMatchObject({ llm: true })
@@ -202,17 +216,13 @@ describe.sequential('enrichment pipeline', () => {
     // The real token helper raises this for an uninstalled or erased shop.
     const { InactiveInstallError } = await import('../lib/shopify-token.js')
     getValidShopifyAdminTokenMock.mockRejectedValueOnce(new InactiveInstallError(merchantId))
-    const shopifyCallsBefore = fetchShopifyProductMock.mock.calls.length
-    try {
-      const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
-      expect(result).toEqual({ skipped: 'merchant-inactive' })
-      expect(fetchShopifyProductMock.mock.calls.length).toBe(shopifyCallsBefore)
-    } finally {
-      await prisma.merchant.update({ where: { id: merchantId }, data: { uninstalledAt: null } })
-    }
+    const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
+    expect(result).toEqual({ skipped: 'merchant-inactive' })
+    expect(fetchShopifyProductMock).not.toHaveBeenCalled()
   })
 
   it('hides a product moved to draft without calling the LLM', async () => {
+    await seedEnrichedProduct()
     fetchShopifyProductMock.mockResolvedValueOnce(product({ status: 'draft', body_html: '<p>Changed.</p>' }))
     const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
     expect(result).toMatchObject({ skipped: 'inactive' })

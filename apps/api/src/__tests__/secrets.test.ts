@@ -40,6 +40,7 @@ describe('runtime secret validation', () => {
       ENCRYPTION_KEY: HEX_KEY,
       NODE_ENV: 'production',
       SHOPIFY_API_SECRET: 'shopify-secret',
+      SHOPIFY_API_KEY: 'shopify-client-id',
     })).not.toThrow()
   })
 
@@ -72,6 +73,14 @@ describe('runtime secret validation', () => {
     expect(() => assertRuntimeSecrets({ ENCRYPTION_KEY: 'ab'.repeat(32) })).toThrow(/trivially guessable/)
     expect(() => assertRuntimeSecrets({ ENCRYPTION_KEY: HEX_KEY, ENCRYPTION_KEY_PREVIOUS: 'c3'.repeat(32) }))
       .toThrow(/ENCRYPTION_KEY_PREVIOUS/)
+  })
+
+  it('rejects a missing or example Shopify client id in production', () => {
+    const production = { ENCRYPTION_KEY: HEX_KEY, NODE_ENV: 'production', SHOPIFY_API_SECRET: 'shopify-secret' }
+    expect(() => assertRuntimeSecrets(production)).toThrow(/SHOPIFY_API_KEY/)
+    expect(() => assertRuntimeSecrets({ ...production, SHOPIFY_API_KEY: 'your_shopify_api_key' })).toThrow(/SHOPIFY_API_KEY/)
+    expect(() => assertRuntimeSecrets({ ...production, SHOPIFY_API_KEY: 'shopify-client-id' })).not.toThrow()
+    expect(() => assertRuntimeSecrets(production, { mode: 'mcp' })).not.toThrow()
   })
 
   it('rejects a blank Shopify secret in production but not in MCP mode', () => {

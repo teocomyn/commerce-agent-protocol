@@ -11,6 +11,8 @@ import {
   type CatalogSyncJobData,
 } from '../lib/queue.js'
 import { runRetention } from '../lib/retention.js'
+import { ENRICHMENT_VERSION } from '../lib/enrichment-output.js'
+import { queueOutdatedEnrichmentResyncs } from '../lib/enrichment-backfill.js'
 import { fetchShopifyInventorySnapshot, fetchShopifyProducts } from '../lib/shopify.js'
 import { InactiveInstallError, getValidShopifyAdminToken } from '../lib/shopify-token.js'
 import { applyInventorySnapshot } from '../lib/inventory.js'
@@ -148,6 +150,8 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
       SET settings = COALESCE(settings, '{}'::jsonb) || ${JSON.stringify({
         lastFullSync: new Date().toISOString(),
         totalProducts: totalProcessed,
+        // Every product was queued for enrichment under this version.
+        enrichmentVersion: ENRICHMENT_VERSION,
       })}::jsonb,
       updated_at = NOW()
       WHERE id = ${merchantId}::uuid
@@ -210,5 +214,11 @@ void maintenanceQueue.upsertJobScheduler(
   { pattern: '0 3 * * *', tz: 'UTC' },
   { name: 'retention' },
 ).catch((error: unknown) => console.error('[Maintenance] Could not register the daily retention schedule:', error))
+
+void queueOutdatedEnrichmentResyncs()
+  .then((queued) => {
+    if (queued > 0) console.log(`[CatalogSync] ${queued} shop(s) queued for re-enrichment (version ${ENRICHMENT_VERSION})`)
+  })
+  .catch((error: unknown) => console.error('[CatalogSync] Could not queue re-enrichment after a version change:', error))
 
 console.log('[Worker] Catalog sync worker started')

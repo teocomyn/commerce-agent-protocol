@@ -60,4 +60,4 @@ Branch: `chore/p2-reliability`, stacked on `chore/p0-hardening` (PR #34)
 ## Next concrete action
 
 - The user merges PR #34, then PR #35. The agent's auto-mode guard blocks `gh pr merge`.
-- After deploying, run one full catalog resync. It sets `shopify_updated_at` on existing rows and re-applies claim filtering, because the enrichment version changed.
+- No manual resync is needed after deploying. The catalog worker re-enriches every active shop automatically, 10 minutes after starting, because `ENRICHMENT_VERSION` changed. This sets `shopify_updated_at` and re-applies claim filtering.

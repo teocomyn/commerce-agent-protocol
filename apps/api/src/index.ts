@@ -328,7 +328,7 @@ app.get('/openapi.json', async (c) => {
               required: false,
               schema: { type: 'string', pattern: '^[A-Za-z0-9_.:-]{1,255}$' },
               description:
-                'Retrying with the same key and body replays the first response (Idempotent-Replayed: true) instead of creating a second cart',
+                'Retrying with the same key and body replays the first response (Idempotent-Replayed: true) instead of creating a second cart. Requests rejected before checkout creation (validation, not found, out of stock) do not consume the key.',
             },
           ],
           requestBody: {
@@ -484,8 +484,8 @@ if (process.env.MCP_MODE !== 'true') {
   // Prefer `pnpm --silent --filter @cap/api mcp`, which skips the HTTP stack.
   const { routeConsoleToStderr } = await import('./mcp/console.js')
   routeConsoleToStderr()
-  const { startMcpServer } = await import('./mcp/server.js')
-  await startMcpServer()
+  const { runMcpOverStdio } = await import('./mcp/server.js')
+  await runMcpOverStdio()
 }
 
 export default app

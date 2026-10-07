@@ -33,11 +33,14 @@ export default function ApiKeysClient({ keys, merchantDomain, role }: ApiKeysCli
   const [newKeyValue, setNewKeyValue] = useState<string | null>(null)
   const [label, setLabel] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // Outcome of a successful action; failures go to `error`.
+  const [notice, setNotice] = useState<{ tone: 'success' | 'warning'; text: string } | null>(null)
   const [isPending, startTransition] = useTransition()
   const canManageKeys = role === 'OWNER' || role === 'ADMIN'
 
   function createKey() {
     setError(null)
+    setNotice(null)
     startTransition(async () => {
       try {
         const res = await fetch('/api/keys', {
@@ -64,6 +67,7 @@ export default function ApiKeysClient({ keys, merchantDomain, role }: ApiKeysCli
 
   function revokeKey(id: string) {
     setError(null)
+    setNotice(null)
     startTransition(async () => {
       try {
         const response = await fetch(`/api/keys/${id}`, { method: 'DELETE' })
@@ -73,9 +77,12 @@ export default function ApiKeysClient({ keys, merchantDomain, role }: ApiKeysCli
         }
         setApiKeys(prev => prev.filter(k => k.id !== id))
         const result = await response.json().catch(() => ({})) as { effectiveWithinSeconds?: number }
-        if (result.effectiveWithinSeconds) {
-          setError(`Key revoked. It may keep working for up to ${result.effectiveWithinSeconds} seconds while caches expire.`)
-        }
+        setNotice(result.effectiveWithinSeconds
+          ? {
+              tone: 'warning',
+              text: `Key revoked. It may keep working for up to ${result.effectiveWithinSeconds} seconds while caches expire.`,
+            }
+          : { tone: 'success', text: 'Key revoked. It no longer authenticates requests.' })
       } catch {
         setError(NETWORK_ERROR_MESSAGE)
       }
@@ -111,6 +118,11 @@ export default function ApiKeysClient({ keys, merchantDomain, role }: ApiKeysCli
       </div>
 
       {error && <div role="alert" style={{ color: 'var(--danger)', marginBottom: 16, fontSize: 13 }}>{error}</div>}
+      {notice && (
+        <div role="status" style={{ color: notice.tone === 'warning' ? 'var(--warning)' : 'var(--success)', marginBottom: 16, fontSize: 13 }}>
+          {notice.text}
+        </div>
+      )}
 
       {/* Create new key */}
       {canManageKeys ? (

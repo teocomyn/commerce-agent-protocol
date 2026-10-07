@@ -1,8 +1,13 @@
 import crypto from 'node:crypto'
 import { createMiddleware } from 'hono/factory'
 import { prisma } from '@cap/db'
-import { rateLimit, cacheGet, cacheSet } from '../lib/redis.js'
-import type { CAPError } from '@cap/shared'
+import { rateLimit, cacheGet, cacheSetIfAbsent } from '../lib/redis.js'
+import {
+  API_KEY_CACHE_TTL_SECONDS,
+  apiKeyCacheKey,
+  apiKeyRateLimitKey,
+  type CAPError,
+} from '@cap/shared'
 
 // ============================================================
 // API KEY AUTH MIDDLEWARE
@@ -20,7 +25,9 @@ declare module 'hono' {
   }
 }
 
-export const API_KEY_CACHE_TTL_SECONDS = 60
+// One warning per minute while the limiter is down, not one per request.
+const LIMITER_WARNING_INTERVAL_MS = 60_000
+let lastLimiterWarningAt = 0
 
 const RATE_LIMITS: Record<string, number> = {
   free: 100,
@@ -48,8 +55,11 @@ export const authMiddleware = createMiddleware(async (c, next) => {
   const hash = crypto.createHash('sha256').update(apiKey).digest('hex')
 
   // Cache keys never contain the bearer secret and can be invalidated by hash.
-  const cacheKey = `apikey:${hash}`
-  let authData = await cacheGet<AuthContext & { plan: string }>(cacheKey)
+  // An invalidation tombstone is a string, not a cached lookup: it sends the
+  // request to Postgres and keeps the result out of the cache.
+  const cacheKey = apiKeyCacheKey(hash)
+  const cached = await cacheGet<AuthContext | string>(cacheKey)
+  let authData = cached !== null && typeof cached === 'object' ? cached : null
 
   if (!authData) {
     const apiKeyRecord = await prisma.apiKey.findFirst({
@@ -73,9 +83,10 @@ export const authMiddleware = createMiddleware(async (c, next) => {
       plan: apiKeyRecord.merchant.plan,
     }
 
-    // Revocation deletes this entry; if that deletion fails the key stays
-    // usable until the entry expires, so keep the window short.
-    await cacheSet(cacheKey, authData, API_KEY_CACHE_TTL_SECONDS)
+    // NX: never replaces a tombstone written by a revocation that committed
+    // while this lookup was in flight. If an invalidation fails entirely the
+    // key stays usable until the entry expires, so keep the window short.
+    await cacheSetIfAbsent(cacheKey, authData, API_KEY_CACHE_TTL_SECONDS)
 
     // Update last used (fire and forget)
     prisma.apiKey.update({
@@ -91,12 +102,15 @@ export const authMiddleware = createMiddleware(async (c, next) => {
   let limit: Awaited<ReturnType<typeof rateLimit>> | null = null
   try {
     limit = await rateLimit(
-      `rl:${hash}`,
+      apiKeyRateLimitKey(hash),
       60_000, // 1 minute window
       maxRequests
     )
   } catch (error) {
-    console.warn('[Auth] Rate limiter unavailable, allowing request:', error instanceof Error ? error.message : error)
+    if (Date.now() - lastLimiterWarningAt >= LIMITER_WARNING_INTERVAL_MS) {
+      lastLimiterWarningAt = Date.now()
+      console.warn('[Auth] Rate limiter unavailable, allowing requests:', error instanceof Error ? error.message : error)
+    }
   }
 
   if (limit) {

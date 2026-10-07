@@ -1,12 +1,10 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@cap/db'
+import { API_KEY_CACHE_TTL_SECONDS } from '@cap/shared'
 import { findActiveMerchant } from '@/lib/merchant-context'
 import { isSameOriginMutation } from '@/lib/dashboard-session'
 import { isUuid, requireDashboardSession } from '@/lib/api-route'
 import { invalidateApiKeyCache } from '@/lib/redis'
-
-// Mirrors API_KEY_CACHE_TTL_SECONDS in apps/api/src/middleware/auth.ts.
-const API_KEY_CACHE_TTL_SECONDS = 60
 
 // DELETE /api/keys/[id] — revoke a key
 export async function DELETE(
@@ -40,9 +38,8 @@ export async function DELETE(
     await invalidateApiKeyCache(key.keyHash)
   } catch (error) {
     // The revocation above is authoritative, but the API caches successful
-    // key lookups for up to 60 s (API_KEY_CACHE_TTL_SECONDS in
-    // apps/api/src/middleware/auth.ts). Say so instead of claiming the key
-    // stopped working immediately.
+    // key lookups for API_KEY_CACHE_TTL_SECONDS. Say so instead of claiming
+    // the key stopped working immediately.
     console.error(
       `[cap-dashboard] API key ${key.id} revoked, but its cache entry could not be invalidated: ${error instanceof Error ? error.message : String(error)}`,
     )

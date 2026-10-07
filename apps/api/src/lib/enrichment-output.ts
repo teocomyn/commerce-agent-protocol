@@ -96,10 +96,12 @@ export const LLM_ENRICHMENT_JSON_SCHEMA = {
 // Shopper-visible fields must not carry certification, label or environmental
 // claims: those come only from merchant metafields. Anything the model emits
 // that looks like one is dropped, whatever the prompt said.
-const CLAIM_PATTERN = /\b(certifi\w*|labell?ed|award\w*|eco[- ]?friendly|eco[- ]?responsible|sustainab\w*|carbon[- ]?(neutral|negative|free)|climate[- ]?(neutral|positive)|biodegradable|compostable|organic|fair[- ]?trade|b[- ]?corp|gots|oeko[- ]?tex|vegan|cruelty[- ]?free)\b/i
+const CLAIM_PATTERN = /\b(certifi\w*|label(?:s|l?ed)?|award\w*|eco[- ]?friendly|eco[- ]?responsible|sustainab\w*|carbon[- ]?(neutral|negative|free)|climate[- ]?(neutral|positive)|biodegradable|compostable|organic|fair[- ]?trade|b[- ]?corp|gots|oeko[- ]?tex|vegan|cruelty[- ]?free)\b/i
 
+// Spec names are often snake_case (`eco_label`): separators count as word
+// boundaries so they are matched like plain words.
 export function isClaimLike(value: string | number | boolean): boolean {
-  return typeof value === 'string' && CLAIM_PATTERN.test(value)
+  return typeof value === 'string' && CLAIM_PATTERN.test(value.replace(/[_-]+/g, ' '))
 }
 
 // Free text keeps its other sentences: only the ones carrying a claim go.

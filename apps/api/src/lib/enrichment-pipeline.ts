@@ -125,14 +125,12 @@ async function step1_normalize(product: {
   const prices = product.variants.map(v => parseFloat(v.price)).filter(p => !isNaN(p))
   const priceMin = Math.min(...prices)
   const priceMax = Math.max(...prices)
-  const totalStock = product.variants.reduce((sum, v) => sum + (v.inventory_quantity ?? 0), 0)
 
   return {
     description,
     tags,
     priceMin: isFinite(priceMin) ? priceMin : null,
     priceMax: isFinite(priceMax) ? priceMax : null,
-    totalStock,
     images: product.images,
     currency: product.currency,
     ...extractCommercePolicies(
@@ -146,7 +144,6 @@ async function step1_normalize(product: {
 
 async function step4_geoScore(enriched: EnrichmentOutput, opts: {
   numberOfImages: number
-  totalStock: number
   daysSinceUpdate?: number
   shippingInfoAvailable: boolean
   certifications: string[]
@@ -361,7 +358,6 @@ export async function runEnrichmentJob(
   const daysSinceUpdate = Math.floor((Date.now() - updatedAt.getTime()) / 86_400_000)
   const geoScore = await step4_geoScore(enrichedData, {
     numberOfImages: normalized.images.length,
-    totalStock: normalized.totalStock,
     daysSinceUpdate,
     shippingInfoAvailable: normalized.shippingInfo != null,
     certifications: normalized.certifications,

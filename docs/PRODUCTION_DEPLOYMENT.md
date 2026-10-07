@@ -12,7 +12,7 @@ The root `render.yaml` provisions the four processes in Frankfurt, plus a privat
 
 The root domain currently serves a different product titled “CLI Agent Protocol”. Confirm that this site can be replaced before moving the root DNS record; the API and dashboard subdomains can be added independently without that cutover.
 
-Before the first Blueprint sync, provide the six secrets marked `sync: false`: `OPENAI_API_KEY`, `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_SCOPES`, `ENCRYPTION_KEY`, and `CAP_OPERATIONS_TOKEN`. The operations token must be random, at least 32 characters, and distinct from merchant API keys and staging. In production, `ENCRYPTION_KEY` must be 64 hex characters (`openssl rand -hex 32`) or base64 of 32 bytes: the API and workers refuse to start otherwise, and they refuse any `.env.example` value. Do not copy a development encryption key after production tokens have already been encrypted.
+Before the first Blueprint sync, provide the six secrets marked `sync: false`: `OPENAI_API_KEY`, `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_SCOPES`, `ENCRYPTION_KEY`, and `CAP_OPERATIONS_TOKEN`. The operations token must be random, at least 32 characters, and distinct from merchant API keys and staging. In production, `ENCRYPTION_KEY` must be 64 hex characters (`openssl rand -hex 32`) or base64 of 32 bytes: the API and workers refuse to start otherwise, and they refuse any `.env.example` value (as well as a missing or example `SHOPIFY_API_KEY` or `SHOPIFY_API_SECRET`). Do not copy a development encryption key after production tokens have already been encrypted.
 
 To rotate the encryption key (or to move an older string-format key to the required format):
 

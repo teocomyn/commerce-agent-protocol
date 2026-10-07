@@ -56,6 +56,11 @@ CAP v0.1 defines three operations. Each has a normative HTTP binding and a corre
 | Compare | `POST /v1/compare` | `commerce_compare` |
 | Initiate Checkout | `POST /v1/checkout/initiate` | `commerce_checkout` |
 
+These product data rules apply to every operation:
+
+- Servers **MUST** only expose products the merchant currently offers for sale (for example Shopify status `ACTIVE`); draft, archived and unlisted products are never returned, compared or checked out. Servers **SHOULD** also exclude products not published to the sales channel they serve.
+- `certifications`, and any result derived from them such as `winner_by_certifications`, **MUST** come from data declared by the merchant. Servers **MUST NOT** infer or generate certifications, labels or environmental claims.
+
 ### 4.1 Search
 
 Semantic + filtered product retrieval.
@@ -81,8 +86,6 @@ Semantic + filtered product retrieval.
 - `query` **MUST** be present, 1–500 chars.
 - `sort` **MUST** be one of `relevance | price_asc | price_desc | geo_score`.
 - Servers **MUST** filter results to the calling merchant's catalog.
-- Servers **MUST** only return products the merchant currently offers for sale (for example Shopify status `ACTIVE`); draft, archived and unlisted products are never exposed. Servers **SHOULD** also exclude products not published to the sales channel they serve.
-- `certifications` **MUST** come from data declared by the merchant. Servers **MUST NOT** infer or generate certifications, labels or environmental claims.
 
 **Response body** — see `examples/search-response.json`. Each result **MUST** include a stable `id`, `merchant`, `price`, `availability`, and a `checkout_url` that points at the same server's checkout endpoint.
 
@@ -121,7 +124,7 @@ Create a checkout session for a single product/variant.
 
 The CAP Server **MUST** persist enough state to reconcile the checkout against an order webhook (or equivalent) and surface the conversion outcome back through analytics.
 
-**Idempotency.** Agents **SHOULD** send an `Idempotency-Key` header (1–255 characters of letters, digits, `_`, `-`, `.`, `:`) so that a retried request does not create a second checkout. A CAP Server that receives a key it already processed for the same merchant:
+**Idempotency.** Agents **SHOULD** send an `Idempotency-Key` header (1–255 characters among ASCII letters, digits, `_`, `-`, `.`, `:`) so that a retried request does not create a second checkout. A CAP Server that receives a key it already processed for the same merchant:
 
 - **MUST** return the first outcome unchanged (success or error, same status and body), with the header `Idempotent-Replayed: true`, when the request body is identical;
 - **MUST** reject the request with `422 IDEMPOTENCY_KEY_REUSED` when the body differs;
@@ -129,6 +132,8 @@ The CAP Server **MUST** persist enough state to reconcile the checkout against a
 - **MUST** reject the request with `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` when the first request stopped before recording its outcome.
 
 A key is never released. A failed or unknown first attempt may still have created a checkout upstream (for example after a timeout), so agents retry with a **new** key once they have decided to try again.
+
+Only requests that reach checkout creation are recorded. A request rejected before it (invalid body, `PRODUCT_NOT_FOUND`, `OUT_OF_STOCK`, `SHIPPING_COUNTRY_UNAVAILABLE`…) creates nothing upstream and does not consume the key: a retry with the same key is evaluated again and can succeed once the cause is gone.
 
 ## 5. Errors
 
@@ -154,6 +159,11 @@ Reserved codes for v0.1:
 | `PRODUCT_NOT_FOUND` | 404 | Unknown `product_id` |
 | `VARIANT_NOT_FOUND` | 404 | Unknown variant for the given product |
 | `OUT_OF_STOCK` | 409 | Insufficient inventory |
+| `SHIPPING_COUNTRY_UNAVAILABLE` | 422 | The merchant does not ship to `shipping_country` |
+| `INVALID_IDEMPOTENCY_KEY` | 400 | `Idempotency-Key` header is malformed |
+| `IDEMPOTENCY_KEY_REUSED` | 422 | Key already used with a different request body |
+| `IDEMPOTENCY_KEY_IN_PROGRESS` | 409 | The first request with this key is still running |
+| `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` | 409 | The first request stopped before recording its outcome; retry with a new key |
 | `FORBIDDEN` | 403 | Caller is not authorized for the merchant or product |
 | `STOREFRONT_NOT_PROVISIONED` | 503 | Server cannot create a checkout (missing upstream credential) |
 | `CHECKOUT_FAILED` | 502 | Upstream commerce platform rejected the checkout |

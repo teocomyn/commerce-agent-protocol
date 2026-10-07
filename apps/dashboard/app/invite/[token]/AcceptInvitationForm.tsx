@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { type FormEvent, useState, useTransition } from 'react'
+import { NETWORK_ERROR_MESSAGE, responseErrorMessage } from '@/lib/response-error'
 
 const inputStyle = {
   width: '100%', padding: '11px 13px', borderRadius: 8,
@@ -31,16 +32,22 @@ export default function AcceptInvitationForm({
   function accept(payload: { token: string; name?: string; password?: string }) {
     setError(null)
     startTransition(async () => {
-      const response = await fetch('/api/invitations/accept', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      const data = await response.json().catch(() => ({})) as { error?: string; redirect?: string }
-      if (!response.ok) {
-        setError(data.error ?? 'Unable to accept this invitation')
+      let response: Response
+      try {
+        response = await fetch('/api/invitations/accept', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      } catch {
+        setError(NETWORK_ERROR_MESSAGE)
         return
       }
+      if (!response.ok) {
+        setError(await responseErrorMessage(response, 'Unable to accept this invitation'))
+        return
+      }
+      const data = await response.json().catch(() => ({})) as { redirect?: string }
       router.replace(data.redirect ?? '/dashboard')
       router.refresh()
     })

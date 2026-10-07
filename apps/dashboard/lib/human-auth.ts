@@ -72,10 +72,25 @@ function formatPasswordHash(params: ScryptParams, salt: Buffer, key: Buffer): st
   return `scrypt$N=${params.N},r=${params.r},p=${params.p}$${salt.toString('base64')}$${key.toString('base64')}`
 }
 
-function isSupportedParams({ N, r, p }: ScryptParams): boolean {
-  // N must be a power of two; the upper bounds keep a corrupted row from
-  // asking for an unbounded amount of work (maxmem still caps memory).
-  return N >= 2 && N <= 2 ** 20 && (N & (N - 1)) === 0 && r >= 1 && r <= 32 && p >= 1 && p <= 16
+// Memory OpenSSL reserves for a derivation (its maxmem check): 128 * r bytes
+// per block, N + 2 blocks for V plus p blocks for B.
+function scryptMemoryBytes({ N, r, p }: ScryptParams): number {
+  return 128 * r * (N + 2 + p)
+}
+
+function isSupportedParams(params: ScryptParams): boolean {
+  const { N, r, p } = params
+  // N must be a power of two; the bounds keep a corrupted row from asking for
+  // an unbounded amount of work, and the memory budget is the one deriveKey
+  // runs with, so an accepted hash can always be verified.
+  return N >= 2 && N <= 2 ** 20 && (N & (N - 1)) === 0 && r >= 1 && r <= 32 && p >= 1 && p <= 16 &&
+    scryptMemoryBytes(params) <= SCRYPT_MAXMEM
+}
+
+// Raising SCRYPT_PARAMS without raising SCRYPT_MAXMEM would make every new
+// hash unverifiable: fail at startup instead of locking accounts out.
+if (!isSupportedParams(SCRYPT_PARAMS) || !isSupportedParams(LEGACY_SCRYPT_PARAMS)) {
+  throw new Error('SCRYPT_PARAMS exceed the SCRYPT_MAXMEM budget')
 }
 
 function parsePasswordHash(stored: string): ParsedPasswordHash | null {

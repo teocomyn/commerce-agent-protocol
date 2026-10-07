@@ -84,6 +84,8 @@ describe('human dashboard authentication', () => {
     for (const corrupted of [
       `scrypt$N=30000,r=8,p=1$${salt}$${key}`,
       `scrypt$N=${2 ** 21},r=8,p=1$${salt}$${key}`,
+      // Valid shape, but beyond the memory budget scrypt runs with.
+      `scrypt$N=${2 ** 20},r=8,p=1$${salt}$${key}`,
       `scrypt$N=32768,r=8$${salt}$${key}`,
       `bcrypt$N=32768,r=8,p=1$${salt}$${key}`,
       `scrypt$N=32768,r=8,p=1$${salt}$not base64!`,

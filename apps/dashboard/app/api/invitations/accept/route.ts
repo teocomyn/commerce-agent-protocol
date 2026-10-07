@@ -20,6 +20,7 @@ import {
 import { consumeDashboardInvitationAttempt } from '@/lib/redis'
 
 const SIGN_IN_REQUIRED = 'Sign in with the invited account, then open this invitation link again.'
+const SIGN_OUT_REQUIRED = 'You are signed in with another account. Sign out, then open this invitation link again.'
 
 // name and password are only used when the invitee creates a new password.
 const acceptInvitationSchema = z.object({
@@ -90,13 +91,17 @@ export async function POST(req: NextRequest) {
     select: { id: true, passwordHash: true },
   })
 
+  const session = await getDashboardSession()
   let acceptance: Acceptance
   if (existingUser?.passwordHash) {
-    const session = await getDashboardSession()
     if (!session || session.userId !== existingUser.id) {
       return NextResponse.json({ error: SIGN_IN_REQUIRED }, { status: 401 })
     }
     acceptance = { kind: 'existing-account', userId: session.userId }
+  } else if (session && session.userId !== existingUser?.id) {
+    // Creating the invited account here would silently replace the signed-in
+    // session with another account's; the page asks to sign out first.
+    return NextResponse.json({ error: SIGN_OUT_REQUIRED }, { status: 409 })
   } else {
     const passwordError = validateHumanPassword(password)
     if (!name || passwordError) {

@@ -1,4 +1,10 @@
 import Redis from 'ioredis'
+import {
+  API_KEY_CACHE_TOMBSTONE,
+  API_KEY_CACHE_TTL_SECONDS,
+  apiKeyCacheKey,
+  apiKeyRateLimitKey,
+} from '@cap/shared'
 
 const globalForRedis = globalThis as unknown as { capDashboardRedis?: Redis }
 
@@ -15,9 +21,16 @@ export const dashboardRedis = globalForRedis.capDashboardRedis ?? new Redis(
 
 if (process.env.NODE_ENV !== 'production') globalForRedis.capDashboardRedis = dashboardRedis
 
+// Writes the tombstone the API checks (see @cap/shared api-key-cache), so a
+// lookup in flight during the revocation cannot cache the key again.
 export async function invalidateApiKeyCache(keyHash: string): Promise<void> {
   try {
-    await dashboardRedis.del(`apikey:${keyHash}`, `rl:${keyHash}`)
+    const results = await dashboardRedis.multi()
+      .set(apiKeyCacheKey(keyHash), JSON.stringify(API_KEY_CACHE_TOMBSTONE), 'EX', API_KEY_CACHE_TTL_SECONDS)
+      .del(apiKeyRateLimitKey(keyHash))
+      .exec()
+    const failure = results?.find(([commandError]) => commandError)?.[0]
+    if (failure) throw failure
   } catch (error) {
     // Revocation is authoritative in Postgres. Surface cache failure so callers
     // don't falsely claim immediate revocation.

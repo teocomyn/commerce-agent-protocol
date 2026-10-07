@@ -59,7 +59,7 @@ describe('LLM enrichment output', () => {
       summary: 'A cotton T-shirt.',
     })
     const normalized = normalizeLlmEnrichment(output)
-    expect(normalized.specs).toEqual({ weight_g: 180, eco_label: true })
+    expect(normalized.specs).toEqual({ weight_g: 180 })
     expect(normalized.use_cases).toEqual(['everyday wear'])
     expect(normalized.target_audience).toEqual(['adults'])
   })

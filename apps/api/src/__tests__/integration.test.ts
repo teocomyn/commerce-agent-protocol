@@ -9,8 +9,16 @@ import { webhookRouter } from '../routes/webhooks.js'
 import { checkoutRouter } from '../routes/checkout.js'
 import { oauthRouter } from '../routes/shopify/oauth.js'
 import { CAP_WEBHOOK_TOPICS, decryptToken, encryptToken } from '../lib/shopify.js'
-import { invalidateMerchantSearchCache, redis, searchCacheKey } from '../lib/redis.js'
+import {
+  cacheSetIfAbsent,
+  invalidateApiKeyCache,
+  invalidateMerchantSearchCache,
+  redis,
+  searchCacheKey,
+} from '../lib/redis.js'
 import { runRetention } from '../lib/retention.js'
+import { queueOutdatedEnrichmentResyncs } from '../lib/enrichment-backfill.js'
+import { ENRICHMENT_VERSION } from '../lib/enrichment-output.js'
 import { catalogSyncQueue, deadLetterQueue, enrichmentQueue, maintenanceQueue } from '../lib/queue.js'
 import { getValidShopifyAdminToken } from '../lib/shopify-token.js'
 import { checkReadiness, operationsRouter } from '../routes/operations.js'
@@ -174,8 +182,20 @@ describe.sequential('CAP integration boundaries', () => {
     const hash = crypto.createHash('sha256').update(key).digest('hex')
     expect((await protectedApp().request('/', { headers: { 'X-CAP-Key': key } })).status).toBe(200)
     await prisma.apiKey.update({ where: { keyHash: hash }, data: { revokedAt: new Date() } })
-    await redis.del(`apikey:${hash}`, `rl:${hash}`)
+    await invalidateApiKeyCache([hash])
     expect((await protectedApp().request('/', { headers: { 'X-CAP-Key': key } })).status).toBe(401)
+  })
+
+  it('never re-caches a key revoked while its lookup was in flight', async () => {
+    const key = await createKey(merchantA, 'integration-revoke-race')
+    const hash = crypto.createHash('sha256').update(key).digest('hex')
+    await prisma.apiKey.update({ where: { keyHash: hash }, data: { revokedAt: new Date() } })
+    await invalidateApiKeyCache([hash])
+    // A lookup that read the key from Postgres before the revocation fills
+    // the cache only now: the tombstone must win.
+    await cacheSetIfAbsent(`apikey:${hash}`, { merchantId: merchantA, apiKeyId: 'stale', plan: 'free' }, 60)
+    expect((await protectedApp().request('/', { headers: { 'X-CAP-Key': key } })).status).toBe(401)
+    await redis.del(`apikey:${hash}`, `rl:${hash}`)
   })
 
   it('enforces tenant isolation in compare', async () => {
@@ -732,8 +752,10 @@ describe.sequential('CAP integration boundaries', () => {
     expect((await prisma.webhookEvent.findUniqueOrThrow({ where: { webhookId: `shop-redact-a-${suffix}` } })).status)
       .toBe('failed')
 
-    // merchantB was uninstalled by the previous test: everything is erased,
-    // including cached API key lookups.
+    // Shopify only sends shop/redact after an uninstall: record it here so the
+    // test does not depend on the uninstall test above (idempotent if it ran).
+    expect((await signedWebhook('app/uninstalled', domains[1]!, `gdpr-uninstall-${suffix}`)).status).toBe(200)
+    // Everything of the uninstalled shop is erased, including cached API key lookups.
     await prisma.agentQuery.create({
       data: { merchantId: merchantB, agentId: 'gdpr', queryText: `gift idea ${suffix}` },
     })
@@ -741,7 +763,7 @@ describe.sequential('CAP integration boundaries', () => {
     const keyBHash = crypto.createHash('sha256').update(keyB).digest('hex')
     await redis.set(`apikey:${keyBHash}`, JSON.stringify({ merchantId: merchantB }))
     expect((await signedWebhook('shop/redact', domains[1]!, `shop-redact-b-${suffix}`)).status).toBe(200)
-    expect(await redis.exists(`apikey:${keyBHash}`)).toBe(0)
+    expect(JSON.parse(await redis.get(`apikey:${keyBHash}`) ?? 'null')).toBe('invalidated')
     expect(await prisma.merchant.findUnique({ where: { id: merchantB } })).toBeNull()
     expect(await prisma.productEnriched.findUnique({ where: { id: productB } })).toBeNull()
     expect(await prisma.agentQuery.count({ where: { queryText: `gift idea ${suffix}` } })).toBe(0)
@@ -839,6 +861,37 @@ describe.sequential('CAP integration boundaries', () => {
       const queued = await catalogSyncQueue.getJobs(['waiting', 'prioritized', 'delayed'])
       await Promise.all(queued
         .filter((job) => job.id?.startsWith('operations-resync-') && job.timestamp >= startedAt)
+        .map((job) => job.remove()))
+    }
+  })
+
+  it('queues one re-enrichment per shop after an enrichment version change', async () => {
+    const startedAt = Date.now()
+    const jobId = `enrichment-version-${ENRICHMENT_VERSION}-${merchantA}`
+    const queuedFor = async () => (await catalogSyncQueue.getJobs(['delayed', 'waiting', 'prioritized']))
+      .filter((job) => job.id === jobId)
+    try {
+      await prisma.$executeRaw`
+        UPDATE merchants SET settings = settings || '{"enrichmentVersion":"2000-01-01"}'::jsonb
+        WHERE id = ${merchantA}::uuid
+      `
+      expect(await queueOutdatedEnrichmentResyncs()).toBeGreaterThanOrEqual(1)
+      // A restart (or a second worker) does not queue the same shop twice.
+      await queueOutdatedEnrichmentResyncs()
+      expect(await queuedFor()).toHaveLength(1)
+
+      // Once a full sync ran under the current version, nothing is queued.
+      await Promise.all((await queuedFor()).map((job) => job.remove()))
+      await prisma.$executeRaw`
+        UPDATE merchants SET settings = settings || ${JSON.stringify({ enrichmentVersion: ENRICHMENT_VERSION })}::jsonb
+        WHERE id = ${merchantA}::uuid
+      `
+      await queueOutdatedEnrichmentResyncs()
+      expect(await queuedFor()).toHaveLength(0)
+    } finally {
+      const queued = await catalogSyncQueue.getJobs(['delayed', 'waiting', 'prioritized'])
+      await Promise.all(queued
+        .filter((job) => job.id?.startsWith('enrichment-version-') && job.timestamp >= startedAt)
         .map((job) => job.remove()))
     }
   })

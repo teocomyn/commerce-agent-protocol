@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { Hono } from 'hono'
-import { prisma } from '@cap/db'
+import { Prisma, prisma } from '@cap/db'
 import {
   buildInstallUrl,
   exchangeCodeForToken,
@@ -150,15 +150,26 @@ oauthRouter.get('/callback', async (c) => {
     where: { userId_merchantId: { userId: user.id, merchantId: merchant.id } },
     select: { role: true, revokedAt: true },
   })
+  const restoreOwner = () => prisma.merchantMember.updateMany({
+    where: {
+      userId: user.id,
+      merchantId: merchant.id,
+      OR: [{ role: { not: 'OWNER' } }, { revokedAt: { not: null } }],
+    },
+    data: { role: 'OWNER', revokedAt: null, sessionVersion: { increment: 1 } },
+  })
   if (!ownerMembership) {
-    await prisma.merchantMember.create({
-      data: { userId: user.id, merchantId: merchant.id, role: 'OWNER' },
-    })
+    try {
+      await prisma.merchantMember.create({
+        data: { userId: user.id, merchantId: merchant.id, role: 'OWNER' },
+      })
+    } catch (error) {
+      // A concurrent callback for the same shop created it first.
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) throw error
+      await restoreOwner()
+    }
   } else if (ownerMembership.role !== 'OWNER' || ownerMembership.revokedAt) {
-    await prisma.merchantMember.update({
-      where: { userId_merchantId: { userId: user.id, merchantId: merchant.id } },
-      data: { role: 'OWNER', revokedAt: null, sessionVersion: { increment: 1 } },
-    })
+    await restoreOwner()
   }
 
   // Trigger full catalog sync

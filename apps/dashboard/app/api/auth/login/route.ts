@@ -12,6 +12,7 @@ import {
 import {
   DUMMY_PASSWORD_HASH,
   MAX_HUMAN_PASSWORD_LENGTH,
+  MIN_HUMAN_PASSWORD_LENGTH,
   hashHumanPassword,
   needsRehash,
   normalizeEmail,
@@ -92,7 +93,9 @@ export async function POST(req: NextRequest) {
   // anyone holding one valid account clear it between guesses on others.
   await clearDashboardLoginAttempts('account', accountKey)
 
-  if (needsRehash(user.passwordHash)) {
+  // Passwords set before the 12-character minimum still sign in, but cannot
+  // be rehashed (hashHumanPassword enforces the minimum): they keep their hash.
+  if (needsRehash(user.passwordHash) && password.length >= MIN_HUMAN_PASSWORD_LENGTH) {
     // Rehash-on-login: upgrade a legacy or weaker hash while the plaintext is
     // at hand. The compare-and-swap leaves a concurrent password change
     // untouched, and a failed upgrade never blocks the sign-in.

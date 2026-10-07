@@ -1,4 +1,5 @@
 export * from './schemas/api.schemas.js'
+export * from './api-key-cache.js'
 
 // Utility: compute GEO score from factors
 export function computeGeoScore(factors: {

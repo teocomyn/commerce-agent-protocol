@@ -100,6 +100,12 @@ export function assertRuntimeSecrets(
     if (production && (!shopifySecret || isPlaceholderSecret(shopifySecret))) {
       errors.push('SHOPIFY_API_SECRET must be set to the Shopify app secret in production.')
     }
+    // Sent as client_id on install and token refresh: an example value only
+    // fails once Shopify rejects the first install.
+    const shopifyKey = env['SHOPIFY_API_KEY']?.trim()
+    if (production && (!shopifyKey || isPlaceholderSecret(shopifyKey))) {
+      errors.push('SHOPIFY_API_KEY must be set to the Shopify app client id in production.')
+    }
   }
 
   if (errors.length > 0) {

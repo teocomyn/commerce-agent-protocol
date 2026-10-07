@@ -42,9 +42,10 @@ paths:
         Returns products of the calling merchant only. Servers MUST only return
         products the merchant currently offers for sale (for example Shopify
         status ACTIVE; never draft, archived or unlisted products, and
-        SHOULD exclude products not published to the served channel), and `certifications` MUST come from data declared by the
-        merchant: servers MUST NOT infer or generate certifications, labels or
-        environmental claims.
+        SHOULD exclude products not published to the served channel), and
+        `certifications` MUST come from data declared by the merchant: servers
+        MUST NOT infer or generate certifications, labels or environmental
+        claims.
       requestBody:
         required: true
         content:
@@ -66,6 +67,11 @@ paths:
       tags: [compare]
       summary: Compare products side-by-side
       operationId: compareProducts
+      description: >-
+        Same product data rules as search: only products currently offered for
+        sale are compared, and `certifications` (and
+        `winner_by_certifications`) MUST come from data declared by the
+        merchant, never inferred or generated.
       requestBody:
         required: true
         content:
@@ -92,9 +98,11 @@ paths:
           in: header
           required: false
           description: >-
-            Client-generated key (1-255 of letters, digits, _ - . :). Retrying
-            with the same key and body replays the first response (header
-            Idempotent-Replayed: true) instead of creating a second checkout.
+            Client-generated key (1-255 ASCII letters, digits, _ - . :).
+            Retrying with the same key and body replays the first response
+            (header Idempotent-Replayed: true) instead of creating a second
+            checkout. Requests rejected before checkout creation (validation,
+            not found, out of stock) do not consume the key.
           schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,255}$' }
       requestBody:
         required: true

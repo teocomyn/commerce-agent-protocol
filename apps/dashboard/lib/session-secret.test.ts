@@ -17,6 +17,16 @@ describe('dashboard session secret validation', () => {
     expect(validateDashboardSessionSecret(secret)).toBe(secret)
   })
 
+  it('applies the length and distinct-character bounds exactly', () => {
+    const twelveDistinct = 'abcdefghijkl'
+    const exactly32 = (twelveDistinct.repeat(3)).slice(0, 32)
+    expect(validateDashboardSessionSecret(exactly32)).toBe(exactly32)
+    expect(() => validateDashboardSessionSecret(exactly32.slice(0, 31))).toThrow(/32 characters/)
+    const elevenDistinct = 'abcdefghijk'.repeat(3)
+    expect(new Set(elevenDistinct).size).toBe(11)
+    expect(() => validateDashboardSessionSecret(elevenDistinct)).toThrow(/trivially guessable/)
+  })
+
   it('rejects missing and short secrets with a generation hint', () => {
     expect(() => validateDashboardSessionSecret(undefined)).toThrow(/32 characters/)
     expect(() => validateDashboardSessionSecret('')).toThrow(/32 characters/)

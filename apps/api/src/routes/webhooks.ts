@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { prisma, type Prisma } from '@cap/db'
 import { verifyShopifyWebhook } from '../lib/shopify.js'
 import { catalogSyncQueue, enrichmentQueue } from '../lib/queue.js'
-import { invalidateMerchantSearchCache, redis } from '../lib/redis.js'
+import { invalidateApiKeyCache, invalidateMerchantSearchCache } from '../lib/redis.js'
 import { extractCheckoutTrackingToken } from '../lib/webhook-utils.js'
 import { applyInventoryLevelUpdate } from '../lib/inventory.js'
 import { redactCustomerOrders, redactShop } from '../lib/retention.js'
@@ -234,9 +234,7 @@ async function processWebhook(args: {
         })}::jsonb
         WHERE id = ${merchantId}::uuid
       `
-      if (keys.length > 0) {
-        await redis.del(...keys.flatMap((key) => [`apikey:${key.keyHash}`, `rl:${key.keyHash}`]))
-      }
+      await invalidateApiKeyCache(keys.map((key) => key.keyHash))
       await invalidateMerchantSearchCache(merchantId)
       break
     }
@@ -266,10 +264,8 @@ async function processWebhook(args: {
         // of silently skipping the erasure.
         throw new Error(`shop/redact received for ${shopDomain}, which is not marked uninstalled`)
       }
-      if (result.apiKeyHashes.length > 0) {
-        await redis.del(...result.apiKeyHashes.flatMap((hash) => [`apikey:${hash}`, `rl:${hash}`]))
-          .catch((error: unknown) => console.error('[Webhook] API key cache eviction failed:', error))
-      }
+      await invalidateApiKeyCache(result.apiKeyHashes)
+        .catch((error: unknown) => console.error('[Webhook] API key cache eviction failed:', error))
       await invalidateMerchantSearchCache(merchantId)
       return { merchantDeleted: true }
     }

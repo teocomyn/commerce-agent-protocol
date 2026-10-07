@@ -1,5 +1,11 @@
 import crypto from 'node:crypto'
 import Redis from 'ioredis'
+import {
+  API_KEY_CACHE_TOMBSTONE,
+  API_KEY_CACHE_TTL_SECONDS,
+  apiKeyCacheKey,
+  apiKeyRateLimitKey,
+} from '@cap/shared'
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379'
 
@@ -44,6 +50,25 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
 
 export async function cacheSet(key: string, value: unknown, ttlSeconds = 300): Promise<void> {
   await redis.setex(key, ttlSeconds, JSON.stringify(value)).catch(() => undefined)
+}
+
+// Only writes when the key is absent, so it never replaces an invalidation
+// tombstone (see API_KEY_CACHE_TOMBSTONE).
+export async function cacheSetIfAbsent(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+  await redis.set(key, JSON.stringify(value), 'EX', ttlSeconds, 'NX').catch(() => undefined)
+}
+
+/** Invalidates cached API key lookups and resets their rate-limit windows. */
+export async function invalidateApiKeyCache(keyHashes: string[]): Promise<void> {
+  if (keyHashes.length === 0) return
+  const transaction = redis.multi()
+  for (const keyHash of keyHashes) {
+    transaction.set(apiKeyCacheKey(keyHash), JSON.stringify(API_KEY_CACHE_TOMBSTONE), 'EX', API_KEY_CACHE_TTL_SECONDS)
+    transaction.del(apiKeyRateLimitKey(keyHash))
+  }
+  const results = await transaction.exec()
+  const failure = results?.find(([error]) => error)?.[0]
+  if (failure) throw failure
 }
 
 export async function cacheDel(key: string): Promise<void> {

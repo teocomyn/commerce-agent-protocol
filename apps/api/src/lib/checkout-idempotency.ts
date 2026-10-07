@@ -1,7 +1,10 @@
 import type { CAPError } from '@cap/shared'
+import { SHOPIFY_MAX_CALL_MS } from './shopify.js'
 
-// Longer than the Shopify call can take (3 attempts of 10 s plus backoff).
-export const IDEMPOTENCY_IN_PROGRESS_MS = 2 * 60 * 1_000
+// Must outlast the Shopify cart call, whose duration is bounded (retries and
+// Retry-After included): a key is only reported as unknown once the first
+// request can no longer be creating a cart.
+export const IDEMPOTENCY_IN_PROGRESS_MS = Math.max(2 * 60 * 1_000, SHOPIFY_MAX_CALL_MS + 30_000)
 
 export interface StoredCheckoutOutcome {
   status: 200 | 409 | 502

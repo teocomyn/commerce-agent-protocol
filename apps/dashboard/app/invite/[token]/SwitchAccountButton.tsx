@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useState, useTransition } from 'react'
+import { NETWORK_ERROR_MESSAGE } from '@/lib/response-error'
 
 // /login sends a signed-in browser straight to /dashboard, so a different
 // account has to sign out first before it can sign in as the invitee.
@@ -20,7 +21,7 @@ export default function SwitchAccountButton() {
           return
         }
       } catch {
-        setError('Network error. Check your connection and try again.')
+        setError(NETWORK_ERROR_MESSAGE)
         return
       }
       router.push('/login')
