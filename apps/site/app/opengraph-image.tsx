@@ -83,7 +83,7 @@ export default async function Image() {
             maxWidth: 960,
           }}
         >
-          The protocol that lets AI agents actually buy things.
+          The protocol that lets AI agents search, compare and start checkout.
         </div>
         <div
           style={{
@@ -94,7 +94,7 @@ export default async function Image() {
             position: 'relative',
           }}
         >
-          Open infrastructure between e-commerce catalogs and shopping agents.
+          Open spec and Apache 2.0 reference implementation. Shopify today.
         </div>
       </div>
     ),

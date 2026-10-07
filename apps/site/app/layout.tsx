@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     template: '%s — CAP',
   },
   description:
-    'The open protocol that lets AI agents actually buy things. Neutral infrastructure between e-commerce catalogs and shopping agents.',
+    'An open protocol that lets AI agents search, compare and start a checkout that the shopper completes. Open spec and Apache 2.0 reference implementation, Shopify today.',
   keywords: [
     'commerce agent protocol',
     'CAP',
@@ -31,14 +31,14 @@ export const metadata: Metadata = {
     url: 'https://cap-protocol.org',
     title: 'CAP — Commerce Agent Protocol',
     description:
-      'The open protocol that lets AI agents actually buy things. Built in public.',
+      'Open protocol for AI agents to search, compare and start checkout on Shopify catalogs. Built in public.',
     siteName: 'Commerce Agent Protocol',
   },
   twitter: {
     card: 'summary_large_image',
     title: 'CAP — Commerce Agent Protocol',
     description:
-      'The open protocol that lets AI agents actually buy things. Built in public.',
+      'Open protocol for AI agents to search, compare and start checkout on Shopify catalogs. Built in public.',
     creator: '@teocomyn',
   },
   robots: { index: true, follow: true },

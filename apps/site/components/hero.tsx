@@ -57,16 +57,16 @@ export function Hero() {
         >
           The protocol that lets{' '}
           <span className="text-gradient-brand">AI agents</span>
-          <br className="hidden sm:block" /> actually buy things.
+          <br className="hidden sm:block" /> search, compare and start checkout.
         </h1>
 
         <p
           className="text-muted text-lg sm:text-xl leading-relaxed max-w-2xl mx-auto mt-7 animate-fade-up"
           style={{ animationDelay: '160ms' }}
         >
-          Open infrastructure between e-commerce catalogs and shopping agents.{' '}
+          Open spec and reference implementation between Shopify catalogs and AI agents.{' '}
           <br className="hidden md:block" />
-          Search, compare, transact. Signed, neutral, multi-vendor.
+          Agents find products and build the cart. The shopper pays on Shopify.
         </p>
 
         <div
@@ -93,15 +93,15 @@ export function Hero() {
           </Button>
         </div>
 
-        {/* Trust strip — 4 micro-stats */}
+        {/* Fact strip: 4 verifiable micro-facts about v0.1 */}
         <div
           className="mt-20 grid grid-cols-2 sm:grid-cols-4 max-w-3xl mx-auto gap-px bg-edge rounded-xl overflow-hidden border border-edge animate-fade-up"
           style={{ animationDelay: '420ms' }}
         >
           {[
-            { v: '< 300ms', l: 'p50 search' },
-            { v: '1536d', l: 'embedding' },
-            { v: 'MCP', l: 'native' },
+            { v: '3', l: 'REST endpoints' },
+            { v: '1536d', l: 'embeddings' },
+            { v: '3', l: 'MCP tools (stdio)' },
             { v: 'Apache 2.0', l: 'license' },
           ].map((s) => (
             <div key={s.l} className="bg-void/80 backdrop-blur p-4 sm:p-5 text-center">
