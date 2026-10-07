@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { applyInventoryLevelUpdate, applyInventorySnapshot, isVariantPurchasable } from '../lib/inventory.js'
+import {
+  applyInventoryLevelUpdate,
+  applyInventorySnapshot,
+  carryOverInventoryLevels,
+  isVariantPurchasable,
+} from '../lib/inventory.js'
 
 describe('multi-location inventory', () => {
   it('updates one location and recomputes the aggregate stock', () => {
@@ -69,5 +74,34 @@ describe('multi-location inventory', () => {
     expect(isVariantPurchasable({ inventory_management: 'shopify', inventory_policy: 'CONTINUE', inventory_quantity: 0 }, 5)).toBe(true)
     expect(isVariantPurchasable({ inventory_management: 'shopify', inventory_policy: 'DENY', inventory_quantity: 2 }, 3)).toBe(false)
     expect(isVariantPurchasable({ inventory_quantity: 3 }, 3)).toBe(true)
+  })
+})
+
+describe('product re-sync', () => {
+  const levels = [
+    { location_id: 10, location_name: 'Paris', available: 5 },
+    { location_id: 20, location_name: 'Lyon', available: 3 },
+  ]
+
+  it('keeps known location levels when the aggregate still matches', () => {
+    const result = carryOverInventoryLevels(
+      [{ id: 1, inventory_item_id: 9001, inventory_quantity: 8, inventory_management: 'shopify', inventory_levels: [] }],
+      [{ id: 1, inventory_item_id: 9001, inventory_quantity: 8, inventory_levels: levels }],
+    )
+    expect(result.variants[0]?.['inventory_levels']).toEqual(levels)
+    expect(result.staleInventoryItemIds).toEqual([])
+  })
+
+  it('flags items whose levels are missing or no longer add up', () => {
+    const result = carryOverInventoryLevels(
+      [
+        { inventory_item_id: 9001, inventory_quantity: 6, inventory_management: 'shopify', inventory_levels: [] },
+        { inventory_item_id: 9002, inventory_quantity: 2, inventory_management: 'shopify', inventory_levels: [] },
+        { inventory_item_id: 9003, inventory_quantity: 0, inventory_management: null, inventory_levels: [] },
+      ],
+      [{ inventory_item_id: 9001, inventory_levels: levels }],
+    )
+    expect(result.variants[0]?.['inventory_levels']).toEqual(levels)
+    expect(result.staleInventoryItemIds).toEqual(['9001', '9002'])
   })
 })

@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { prisma } from '@cap/db'
 import { SearchRequestSchema, type SearchResponse } from '@cap/shared'
-import { cacheGet, cacheSet } from '../lib/redis.js'
+import { cacheGet, cacheSet, searchCacheKey } from '../lib/redis.js'
 import OpenAI from 'openai'
 import { capJsonValidator } from '../lib/validation.js'
 import { isVariantPurchasable } from '../lib/inventory.js'
@@ -12,6 +12,7 @@ const openai = new OpenAI({
   maxRetries: 2,
 })
 const searchRouter = new Hono()
+const SEARCH_CACHE_TTL_SECONDS = 120
 
 function detectAgentType(userAgent: string): string {
   const ua = userAgent.toLowerCase()
@@ -68,8 +69,8 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
   const searchId = `srch_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`
 
   // Cache is scoped per-merchant to honor the multi-tenant filter
-  const cacheKey = `search:${auth.merchantId}:${JSON.stringify({ query, filters, limit, sort })}`
-  const cached = await cacheGet<SearchResponse>(cacheKey)
+  const cacheKey = await searchCacheKey(auth.merchantId, { query, filters, limit, sort })
+  const cached = cacheKey ? await cacheGet<SearchResponse>(cacheKey) : null
   if (cached) {
     const latency = Date.now() - startTime
     const agentQueryId = await persistAgentQuery({
@@ -340,7 +341,7 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
     latency_ms: latency,
   }
 
-  await cacheSet(cacheKey, response, 120)
+  if (cacheKey) await cacheSet(cacheKey, response, SEARCH_CACHE_TTL_SECONDS)
   return c.json(response)
 })
 

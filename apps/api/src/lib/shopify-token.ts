@@ -10,6 +10,19 @@ import {
 
 const REFRESH_EARLY_MS = 5 * 60 * 1_000
 
+/**
+ * Jobs can outlive an install (uninstall, or shop/redact deleting the shop).
+ * Workers skip them instead of failing, so they are not retried for nothing
+ * and do not land in the dead-letter queue.
+ */
+export async function isMerchantInstallActive(merchantId: string): Promise<boolean> {
+  const merchant = await prisma.merchant.findUnique({
+    where: { id: merchantId },
+    select: { uninstalledAt: true, shopifyToken: true },
+  })
+  return Boolean(merchant && !merchant.uninstalledAt && merchant.shopifyToken)
+}
+
 export async function getValidShopifyAdminToken(merchantId: string): Promise<string> {
   for (let pass = 0; pass < 2; pass++) {
     const merchant = await prisma.merchant.findUniqueOrThrow({

@@ -81,24 +81,33 @@ export const authMiddleware = createMiddleware(async (c, next) => {
     }).catch(() => {/* noop */})
   }
 
-  // Rate limiting per API key
+  // Rate limiting per API key. If Redis is unavailable the request is let
+  // through (fail open): authentication already succeeded against Postgres,
+  // and /ready reports the Redis outage so the platform can react.
   const maxRequests = RATE_LIMITS[authData.plan] ?? 100
-  const { allowed, remaining, resetMs } = await rateLimit(
-    `rl:${hash}`,
-    60_000, // 1 minute window
-    maxRequests
-  )
+  let limit: Awaited<ReturnType<typeof rateLimit>> | null = null
+  try {
+    limit = await rateLimit(
+      `rl:${hash}`,
+      60_000, // 1 minute window
+      maxRequests
+    )
+  } catch (error) {
+    console.warn('[Auth] Rate limiter unavailable, allowing request:', error instanceof Error ? error.message : error)
+  }
 
-  c.header('X-RateLimit-Limit', String(maxRequests))
-  c.header('X-RateLimit-Remaining', String(remaining))
-  c.header('X-RateLimit-Reset', String(Math.floor(resetMs / 1000)))
+  if (limit) {
+    c.header('X-RateLimit-Limit', String(maxRequests))
+    c.header('X-RateLimit-Remaining', String(limit.remaining))
+    c.header('X-RateLimit-Reset', String(Math.floor(limit.resetMs / 1000)))
+  }
 
-  if (!allowed) {
+  if (limit && !limit.allowed) {
     return c.json<CAPError>({
       error: {
         code: 'RATE_LIMIT_EXCEEDED',
         message: `Rate limit exceeded. Max ${maxRequests} requests/minute for ${authData.plan} plan.`,
-        details: { reset_at: new Date(resetMs).toISOString() },
+        details: { reset_at: new Date(limit.resetMs).toISOString() },
       },
     }, 429)
   }

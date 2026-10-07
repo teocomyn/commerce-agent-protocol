@@ -1,0 +1,184 @@
+import crypto from 'node:crypto'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { prisma } from '@cap/db'
+import type { ShopifyProduct } from '../lib/shopify.js'
+
+const chatCreateMock = vi.hoisted(() => vi.fn(async () => ({
+  choices: [{
+    message: {
+      content: JSON.stringify({
+        category: 'Footwear > Sneakers',
+        subcategory: 'Sneakers',
+        specs: [{ name: 'material', value: 'leather' }, { name: 'weight_g', value: 310 }],
+        use_cases: ['city'],
+        target_audience: ['adults'],
+        care_info: null,
+        size_guide: null,
+        summary: 'A white leather sneaker.',
+      }),
+    },
+  }],
+})))
+const embeddingsCreateMock = vi.hoisted(() => vi.fn(async () => ({
+  data: [{ embedding: Array.from({ length: 1536 }, () => 0.01) }],
+})))
+const fetchShopifyProductMock = vi.hoisted(() => vi.fn())
+
+vi.mock('openai', () => ({
+  default: class OpenAITestDouble {
+    chat = { completions: { create: chatCreateMock } }
+    embeddings = { create: embeddingsCreateMock }
+  },
+}))
+vi.mock('../lib/shopify.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/shopify.js')>(),
+  fetchShopifyProduct: fetchShopifyProductMock,
+}))
+vi.mock('../lib/shopify-token.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/shopify-token.js')>(),
+  getValidShopifyAdminToken: vi.fn(async () => 'admin-token'),
+}))
+
+const { runEnrichmentJob } = await import('../lib/enrichment-pipeline.js')
+const { catalogSyncQueue, deadLetterQueue, enrichmentQueue, maintenanceQueue } = await import('../lib/queue.js')
+const { redis } = await import('../lib/redis.js')
+
+const shopDomain = `cap-pipeline-${crypto.randomBytes(5).toString('hex')}.myshopify.com`
+const shopifyProductId = '7001'
+let merchantId: string
+
+function product(overrides: Partial<ShopifyProduct> = {}): ShopifyProduct {
+  return {
+    id: Number(shopifyProductId),
+    title: 'Leather sneaker',
+    body_html: '<p>White leather sneaker.</p>',
+    vendor: 'Brand',
+    product_type: 'Shoes',
+    tags: 'white, leather',
+    status: 'active',
+    variants: [{
+      id: 70011,
+      inventory_item_id: 80011,
+      title: 'Default',
+      price: '110.00',
+      sku: null,
+      inventory_quantity: 5,
+      inventory_management: 'shopify',
+      inventory_policy: 'DENY',
+      inventory_levels: [],
+      option1: null,
+      option2: null,
+      option3: null,
+      weight: 0,
+      weight_unit: 'kg',
+    }],
+    images: [{ id: 1, src: 'https://cdn.example/1.jpg', alt: 'White sneaker', width: 100, height: 100 }],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    currency: 'EUR',
+    metafields: [{ namespace: 'cap', key: 'certifications', type: 'list.single_line_text_field', value: '["LWG Gold"]' }],
+    shop_policies: [],
+    shipping_countries: ['FR'],
+    ...overrides,
+  }
+}
+
+const job = { id: 'test-job', updateProgress: async () => undefined }
+
+async function enrichedRow() {
+  const raw = await prisma.productRaw.findUniqueOrThrow({
+    where: { merchantId_shopifyId: { merchantId, shopifyId: BigInt(shopifyProductId) } },
+    include: { productEnriched: true },
+  })
+  return raw
+}
+
+describe.sequential('enrichment pipeline', () => {
+  beforeAll(async () => {
+    const merchant = await prisma.merchant.create({
+      data: { shopifyDomain: shopDomain, shopifyToken: 'v2:not-decrypted-in-this-test' },
+    })
+    merchantId = merchant.id
+  })
+
+  beforeEach(() => {
+    chatCreateMock.mockClear()
+    embeddingsCreateMock.mockClear()
+  })
+
+  afterAll(async () => {
+    await prisma.merchant.deleteMany({ where: { shopifyDomain: shopDomain } })
+    await prisma.$disconnect()
+    await Promise.all([
+      enrichmentQueue.close(),
+      catalogSyncQueue.close(),
+      maintenanceQueue.close(),
+      deadLetterQueue.close(),
+    ])
+    await redis.quit()
+  })
+
+  it('enriches a new product once and stores merchant-declared claims', async () => {
+    fetchShopifyProductMock.mockResolvedValueOnce(product())
+    const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'create' }, job)
+    expect(result).toMatchObject({ llm: true })
+    expect(chatCreateMock).toHaveBeenCalledTimes(1)
+    expect(embeddingsCreateMock).toHaveBeenCalledTimes(1)
+    const raw = await enrichedRow()
+    expect(raw.productEnriched?.certifications).toEqual(['LWG Gold'])
+    expect(raw.productEnriched?.specs).toEqual({ material: 'leather', weight_g: 310 })
+    expect(Number(raw.productEnriched?.priceMin)).toBe(110)
+  })
+
+  it('refreshes prices without calling the LLM when the content is unchanged', async () => {
+    fetchShopifyProductMock.mockResolvedValueOnce(product({
+      variants: [{ ...product().variants[0]!, price: '95.00' }],
+    }))
+    const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
+    expect(result).toMatchObject({ llm: false })
+    expect(chatCreateMock).not.toHaveBeenCalled()
+    expect(embeddingsCreateMock).not.toHaveBeenCalled()
+    const raw = await enrichedRow()
+    expect(Number(raw.productEnriched?.priceMin)).toBe(95)
+    expect(raw.productEnriched?.specs).toEqual({ material: 'leather', weight_g: 310 })
+  })
+
+  it('keeps known inventory levels across a product re-sync', async () => {
+    const levels = [{ location_id: 10, location_name: 'Paris', available: 5 }]
+    await prisma.productRaw.update({
+      where: { merchantId_shopifyId: { merchantId, shopifyId: BigInt(shopifyProductId) } },
+      data: { variants: [{ ...product().variants[0]!, inventory_levels: levels }] },
+    })
+    fetchShopifyProductMock.mockResolvedValueOnce(product())
+    await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
+    const raw = await enrichedRow()
+    expect((raw.variants as Array<{ inventory_levels: unknown }>)[0]?.inventory_levels).toEqual(levels)
+  })
+
+  it('enriches again when the description changes', async () => {
+    fetchShopifyProductMock.mockResolvedValueOnce(product({ body_html: '<p>Black leather sneaker.</p>' }))
+    const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
+    expect(result).toMatchObject({ llm: true })
+    expect(chatCreateMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips jobs once the shop has uninstalled the app', async () => {
+    await prisma.merchant.update({ where: { id: merchantId }, data: { uninstalledAt: new Date() } })
+    const shopifyCallsBefore = fetchShopifyProductMock.mock.calls.length
+    try {
+      const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
+      expect(result).toEqual({ skipped: 'merchant-inactive' })
+      expect(fetchShopifyProductMock.mock.calls.length).toBe(shopifyCallsBefore)
+    } finally {
+      await prisma.merchant.update({ where: { id: merchantId }, data: { uninstalledAt: null } })
+    }
+  })
+
+  it('hides a product moved to draft without calling the LLM', async () => {
+    fetchShopifyProductMock.mockResolvedValueOnce(product({ status: 'draft', body_html: '<p>Changed.</p>' }))
+    const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
+    expect(result).toMatchObject({ skipped: 'inactive' })
+    expect(chatCreateMock).not.toHaveBeenCalled()
+    expect((await enrichedRow()).status).toBe('draft')
+  })
+})

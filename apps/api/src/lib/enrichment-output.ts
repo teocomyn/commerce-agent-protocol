@@ -1,5 +1,36 @@
+import crypto from 'node:crypto'
 import { z } from 'zod'
 import { EnrichmentOutputSchema, type EnrichmentOutput } from '@cap/shared'
+
+// Bump whenever the prompt, the model or the output schema changes, so every
+// product is enriched again on its next sync.
+export const ENRICHMENT_VERSION = '2026-10-07'
+
+export interface EnrichmentSource {
+  title: string
+  description: string
+  vendor: string
+  productType: string
+  tags: string[]
+  images: Array<{ src: string; alt: string | null }>
+}
+
+/**
+ * Fingerprint of everything the LLM and the embedding see. Price, stock,
+ * policy and metafield changes do not alter it, so they are applied without
+ * paying for a new enrichment.
+ */
+export function enrichmentSourceHash(source: EnrichmentSource): string {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    version: ENRICHMENT_VERSION,
+    title: source.title,
+    description: source.description.slice(0, 1500),
+    vendor: source.vendor,
+    productType: source.productType,
+    tags: source.tags,
+    images: source.images.slice(0, 3).map((image) => [image.src, image.alt]),
+  })).digest('hex')
+}
 
 // Strict structured outputs require every key to be required and every object
 // to be closed, so free-form maps are requested as arrays and normalized below.

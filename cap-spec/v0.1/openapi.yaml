@@ -80,6 +80,15 @@ paths:
       tags: [checkout]
       summary: Create a checkout session
       operationId: initiateCheckout
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Client-generated key (1-255 of letters, digits, _ - . :). Retrying
+            with the same key and body replays the first response (header
+            Idempotent-Replayed: true) instead of creating a second checkout.
+          schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,255}$' }
       requestBody:
         required: true
         content:
@@ -96,8 +105,18 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '400':
+          description: Invalid request body or Idempotency-Key
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Out of stock
+          description: Out of stock (OUT_OF_STOCK) or same Idempotency-Key still in progress (IDEMPOTENCY_KEY_IN_PROGRESS)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Shipping country not served (SHIPPING_COUNTRY_UNAVAILABLE) or Idempotency-Key reused with another body (IDEMPOTENCY_KEY_REUSED)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

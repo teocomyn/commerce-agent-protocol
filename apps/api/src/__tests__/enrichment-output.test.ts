@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   LLM_ENRICHMENT_JSON_SCHEMA,
   LlmEnrichmentSchema,
+  enrichmentSourceHash,
   normalizeLlmEnrichment,
 } from '../lib/enrichment-output.js'
 
@@ -60,5 +61,22 @@ describe('LLM enrichment output', () => {
       size_guide: { '42': '27 cm' },
       summary: 'A leather sneaker.',
     })
+  })
+})
+
+describe('enrichment source hash', () => {
+  const source = {
+    title: 'Leather sneaker',
+    description: 'White leather.',
+    vendor: 'Brand',
+    productType: 'Shoes',
+    tags: ['white'],
+    images: [{ src: 'https://cdn.example/1.jpg', alt: null }],
+  }
+
+  it('is stable for identical content and changes with the content', () => {
+    expect(enrichmentSourceHash(source)).toBe(enrichmentSourceHash({ ...source }))
+    expect(enrichmentSourceHash(source)).not.toBe(enrichmentSourceHash({ ...source, description: 'Black leather.' }))
+    expect(enrichmentSourceHash(source)).not.toBe(enrichmentSourceHash({ ...source, tags: ['black'] }))
   })
 })

@@ -107,3 +107,45 @@ export function applyInventorySnapshot(
     }
   })
 }
+
+/**
+ * The product query only returns the aggregate stock of each variant, so a
+ * product re-sync would otherwise wipe the per-location levels that
+ * inventory webhooks rely on (an empty list makes the next webhook zero the
+ * stock until a snapshot lands). Known levels are carried over; inventory
+ * items without levels, or whose levels no longer add up to the aggregate,
+ * are returned so the caller can schedule an authoritative snapshot.
+ */
+export function carryOverInventoryLevels(
+  incoming: Array<Record<string, unknown>>,
+  existing: unknown,
+): { variants: Array<Record<string, unknown>>; staleInventoryItemIds: string[] } {
+  const previousLevels = new Map<string, Array<Record<string, unknown>>>()
+  if (Array.isArray(existing)) {
+    for (const candidate of existing) {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue
+      const variant = candidate as Record<string, unknown>
+      const levels = variant['inventory_levels']
+      if (variant['inventory_item_id'] == null || !Array.isArray(levels) || levels.length === 0) continue
+      previousLevels.set(String(variant['inventory_item_id']), levels as Array<Record<string, unknown>>)
+    }
+  }
+
+  const staleInventoryItemIds: string[] = []
+  const variants = incoming.map((variant) => {
+    const inventoryItemId = variant['inventory_item_id']
+    // Untracked inventory never needs location levels.
+    if (inventoryItemId == null || variant['inventory_management'] === null) return variant
+    const levels = previousLevels.get(String(inventoryItemId))
+    if (!levels) {
+      staleInventoryItemIds.push(String(inventoryItemId))
+      return variant
+    }
+    const total = levels.reduce((sum, level) => sum + finiteQuantity(level['available']), 0)
+    if (total !== finiteQuantity(variant['inventory_quantity'])) {
+      staleInventoryItemIds.push(String(inventoryItemId))
+    }
+    return { ...variant, inventory_levels: levels }
+  })
+  return { variants, staleInventoryItemIds }
+}

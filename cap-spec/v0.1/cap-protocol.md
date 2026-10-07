@@ -121,6 +121,14 @@ Create a checkout session for a single product/variant.
 
 The CAP Server **MUST** persist enough state to reconcile the checkout against an order webhook (or equivalent) and surface the conversion outcome back through analytics.
 
+**Idempotency.** Agents **SHOULD** send an `Idempotency-Key` header (1–255 characters of letters, digits, `_`, `-`, `.`, `:`) so that a retried request does not create a second checkout. A CAP Server that receives a key it already processed for the same merchant:
+
+- **MUST** return the first response unchanged, with the header `Idempotent-Replayed: true`, when the request body is identical;
+- **MUST** reject the request with `422 IDEMPOTENCY_KEY_REUSED` when the body differs;
+- **MUST** reject the request with `409 IDEMPOTENCY_KEY_IN_PROGRESS` while the first request is still running.
+
+A request that failed upstream (for example `502`) releases its key, so the agent may retry it with the same key.
+
 ## 5. Errors
 
 All errors **MUST** use the canonical envelope:

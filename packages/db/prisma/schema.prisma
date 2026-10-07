@@ -196,6 +196,8 @@ model ProductEnriched {
   // `prisma migrate dev` never generates a migration dropping it; read and
   // written with raw SQL only.
   embedding  Unsupported("vector(1536)")?
+  // sha256 of the content sent to the LLM; unchanged content skips enrichment.
+  sourceHash String?                      @map("source_hash") @db.VarChar(64)
   enrichedAt DateTime                     @default(now()) @map("enriched_at") @db.Timestamptz
   version    Int                          @default(1)
   deletedAt  DateTime?                    @map("deleted_at") @db.Timestamptz
@@ -265,14 +267,19 @@ model AgentCheckout {
   shopifyCheckoutId String?  @map("shopify_checkout_id") @db.VarChar(255)
   shopifyOrderId    String?  @map("shopify_order_id") @db.VarChar(64)
   trackingToken     String   @unique @map("tracking_token") @db.VarChar(64)
-  status            String   @default("pending") @db.VarChar(50) // pending | completed | abandoned
+  status            String   @default("pending") @db.VarChar(50) // creating | pending | failed | ordered | completed
   amount            Decimal? @db.Decimal(10, 2)
   currency          String?  @db.VarChar(3)
+  idempotencyKey    String?  @map("idempotency_key") @db.VarChar(255)
+  requestHash       String?  @map("request_hash") @db.VarChar(64)
+  response          Json?    @db.JsonB
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   agentQuery      AgentQuery?     @relation(fields: [agentQueryId], references: [id])
   merchant        Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   productEnriched ProductEnriched @relation(fields: [productId], references: [id], onDelete: Cascade)
 
+  @@unique([merchantId, idempotencyKey])
+  @@index([merchantId, createdAt])
   @@map("agent_checkouts")
 }

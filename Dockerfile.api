@@ -23,4 +23,9 @@ RUN pnpm --filter @cap/api... build
 ENV NODE_ENV=production
 EXPOSE 3000
 
-CMD ["pnpm", "--filter", "@cap/api", "start"]
+# Run node directly as PID 1: pnpm does not forward SIGTERM, which would skip
+# the graceful shutdown (draining HTTP requests and active jobs) on deploys.
+# Workers override this with their own `node .../workers/*.worker.js` command.
+# WORKDIR stays /app so Render's `pnpm db:migrate` pre-deploy command resolves
+# the root workspace script.
+CMD ["node", "apps/api/dist/apps/api/src/index.js"]

@@ -12,6 +12,10 @@ import { oauthRouter } from './routes/shopify/oauth.js'
 import { checkReadiness, operationsRouter } from './routes/operations.js'
 import { authMiddleware } from './middleware/auth.js'
 import { assertRuntimeSecrets } from './lib/secrets.js'
+import { registerGracefulShutdown } from './lib/shutdown.js'
+import { catalogSyncQueue, deadLetterQueue, enrichmentQueue, maintenanceQueue } from './lib/queue.js'
+import { redis } from './lib/redis.js'
+import { prisma } from '@cap/db'
 import type { CAPError } from '@cap/shared'
 
 const app = new Hono()
@@ -23,10 +27,12 @@ const app = new Hono()
 app.use('*', logger())
 app.use('*', secureHeaders())
 app.use('/v1/*', cors({
-  origin: ['https://claude.ai', 'https://chatgpt.com', 'https://perplexity.ai', '*'],
+  // Browser calls are limited to these agent origins; server-to-server agent
+  // calls are unaffected by CORS. (A literal '*' inside an array never matched.)
+  origin: ['https://claude.ai', 'https://chatgpt.com', 'https://perplexity.ai'],
   allowMethods: ['GET', 'POST', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'X-CAP-Key', 'Authorization'],
-  exposeHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
+  allowHeaders: ['Content-Type', 'X-CAP-Key', 'Authorization', 'Idempotency-Key', 'X-Agent-ID'],
+  exposeHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Idempotent-Replayed'],
 }))
 
 // ============================================================
@@ -315,6 +321,16 @@ app.get('/openapi.json', async (c) => {
           summary: 'Initiate checkout',
           description:
             'Create a Shopify Cart for the given product / variant and return its checkoutUrl. The agent forwards the URL to the user (or follows it itself) to complete payment.',
+          parameters: [
+            {
+              name: 'Idempotency-Key',
+              in: 'header',
+              required: false,
+              schema: { type: 'string', pattern: '^[A-Za-z0-9_.:-]{1,255}$' },
+              description:
+                'Retrying with the same key and body replays the first response (Idempotent-Replayed: true) instead of creating a second cart',
+            },
+          ],
           requestBody: {
             required: true,
             content: {
@@ -383,9 +399,11 @@ app.get('/openapi.json', async (c) => {
                 },
               },
             },
+            '400': { description: 'Invalid request body or Idempotency-Key' },
             '403': { description: 'API key not authorized for this merchant' },
             '404': { description: 'Product or variant not found' },
-            '409': { description: 'Out of stock' },
+            '409': { description: 'Out of stock, or same Idempotency-Key still in progress' },
+            '422': { description: 'Shipping country not served, or Idempotency-Key reused with another body' },
             '502': { description: 'Shopify Storefront API error' },
             '503': { description: 'Storefront access token not provisioned' },
           },
@@ -437,7 +455,7 @@ assertRuntimeSecrets()
 
 // Only start HTTP server if not in MCP mode
 if (process.env.MCP_MODE !== 'true') {
-  serve({ fetch: app.fetch, port }, (info) => {
+  const server = serve({ fetch: app.fetch, port }, () => {
     console.log(`
 ╔═══════════════════════════════════════════╗
 ║  🛒 Commerce Agent Protocol API           ║
@@ -447,6 +465,21 @@ if (process.env.MCP_MODE !== 'true') {
 ╚═══════════════════════════════════════════╝
     `)
   })
+  registerGracefulShutdown('api', [
+    // Stop accepting connections and let in-flight requests finish.
+    { name: 'http', close: () => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())) },
+    {
+      name: 'queues',
+      close: () => Promise.all([
+        enrichmentQueue.close(),
+        catalogSyncQueue.close(),
+        maintenanceQueue.close(),
+        deadLetterQueue.close(),
+      ]),
+    },
+    { name: 'redis', close: () => redis.quit() },
+    { name: 'postgres', close: () => prisma.$disconnect() },
+  ])
 } else {
   // Prefer `pnpm --silent --filter @cap/api mcp`, which skips the HTTP stack.
   const { routeConsoleToStderr } = await import('./mcp/console.js')

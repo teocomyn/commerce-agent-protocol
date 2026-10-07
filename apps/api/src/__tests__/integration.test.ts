@@ -9,8 +9,9 @@ import { webhookRouter } from '../routes/webhooks.js'
 import { checkoutRouter } from '../routes/checkout.js'
 import { oauthRouter } from '../routes/shopify/oauth.js'
 import { CAP_WEBHOOK_TOPICS, decryptToken, encryptToken } from '../lib/shopify.js'
-import { redis } from '../lib/redis.js'
-import { catalogSyncQueue, deadLetterQueue, enrichmentQueue } from '../lib/queue.js'
+import { invalidateMerchantSearchCache, redis, searchCacheKey } from '../lib/redis.js'
+import { runRetention } from '../lib/retention.js'
+import { catalogSyncQueue, deadLetterQueue, enrichmentQueue, maintenanceQueue } from '../lib/queue.js'
 import { getValidShopifyAdminToken } from '../lib/shopify-token.js'
 import { checkReadiness, operationsRouter } from '../routes/operations.js'
 
@@ -60,6 +61,22 @@ async function createKey(merchantId: string, label: string): Promise<string> {
     },
   })
   return key
+}
+
+function signedWebhook(topic: string, shopDomain: string, webhookId: string, body: unknown = {}) {
+  const payload = JSON.stringify(body)
+  const hmac = crypto.createHmac('sha256', 'integration-shopify-secret').update(payload).digest('base64')
+  return webhookRouter.request('/shopify', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Shopify-Hmac-Sha256': hmac,
+      'X-Shopify-Topic': topic,
+      'X-Shopify-Shop-Domain': shopDomain,
+      'X-Shopify-Webhook-Id': webhookId,
+    },
+    body: payload,
+  })
 }
 
 function protectedApp() {
@@ -130,7 +147,12 @@ describe.sequential('CAP integration boundaries', () => {
     await prisma.merchant.deleteMany({ where: { shopifyDomain: { in: domains } } })
     await redis.del(`apikey:${validKeyHash}`, `rl:${validKeyHash}`)
     await prisma.$disconnect()
-    await Promise.all([enrichmentQueue.close(), catalogSyncQueue.close(), deadLetterQueue.close()])
+    await Promise.all([
+      enrichmentQueue.close(),
+      catalogSyncQueue.close(),
+      maintenanceQueue.close(),
+      deadLetterQueue.close(),
+    ])
     await redis.quit()
   })
 
@@ -498,6 +520,37 @@ describe.sequential('CAP integration boundaries', () => {
     })
   })
 
+  it('replays an idempotent checkout instead of creating a second cart', async () => {
+    createShopifyCartMock.mockClear()
+    const app = new Hono()
+    app.use('/v1/*', authMiddleware)
+    app.route('/v1/checkout', checkoutRouter)
+    const send = (body: unknown, idempotencyKey = `idem-${suffix}`) => app.request('/v1/checkout/initiate', {
+      method: 'POST',
+      headers: {
+        'X-CAP-Key': validKey,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: JSON.stringify(body),
+    })
+    const body = { product_id: productA, quantity: 1, shipping_country: 'FR' }
+
+    const first = await send(body)
+    expect(first.status).toBe(200)
+    const firstBody = await first.json()
+    const replay = await send(body)
+    expect(replay.status).toBe(200)
+    expect(replay.headers.get('Idempotent-Replayed')).toBe('true')
+    expect(await replay.json()).toEqual(firstBody)
+    expect(createShopifyCartMock).toHaveBeenCalledTimes(1)
+
+    const reused = await send({ ...body, quantity: 2 })
+    expect(reused.status).toBe(422)
+    await expect(reused.json()).resolves.toMatchObject({ error: { code: 'IDEMPOTENCY_KEY_REUSED' } })
+    expect((await send(body, 'not a valid key')).status).toBe(400)
+  })
+
   it('hides draft products from search, compare and checkout', async () => {
     await prisma.productRaw.updateMany({ where: { merchantId: merchantA }, data: { status: 'draft' } })
     try {
@@ -539,6 +592,16 @@ describe.sequential('CAP integration boundaries', () => {
   })
 
   it('revokes credentials when Shopify uninstalls the app', async () => {
+    const inviter = await prisma.user.create({ data: { externalId: `inviter-${suffix}` } })
+    const invitation = await prisma.merchantInvitation.create({
+      data: {
+        merchantId: merchantB,
+        email: `invitee-${suffix}@example.test`,
+        tokenHash: crypto.randomBytes(32).toString('hex'),
+        invitedByUserId: inviter.id,
+        expiresAt: new Date(Date.now() + 86_400_000),
+      },
+    })
     const payload = '{}'
     const hmac = crypto.createHmac('sha256', 'integration-shopify-secret').update(payload).digest('base64')
     const response = await webhookRouter.request('/shopify', {
@@ -557,6 +620,68 @@ describe.sequential('CAP integration boundaries', () => {
     expect(merchant.shopifyToken).toBeNull()
     expect(merchant.storefrontToken).toBeNull()
     expect(merchant.uninstalledAt).toBeInstanceOf(Date)
+    const revoked = await prisma.merchantInvitation.findUniqueOrThrow({ where: { id: invitation.id } })
+    expect(revoked.revokedAt).toBeInstanceOf(Date)
+    await prisma.user.delete({ where: { id: inviter.id } })
+  })
+
+  it('handles the Shopify GDPR compliance webhooks', async () => {
+    const checkout = await prisma.agentCheckout.create({
+      data: {
+        merchantId: merchantA,
+        productId: productA,
+        trackingToken: crypto.randomBytes(32).toString('hex'),
+        status: 'completed',
+        shopifyOrderId: '555001',
+      },
+    })
+    expect((await signedWebhook('customers/redact', domains[0]!, `redact-${suffix}`, {
+      orders_to_redact: [555001],
+    })).status).toBe(200)
+    expect((await prisma.agentCheckout.findUniqueOrThrow({ where: { id: checkout.id } })).shopifyOrderId).toBeNull()
+
+    expect((await signedWebhook('customers/data_request', domains[0]!, `data-request-${suffix}`)).status).toBe(200)
+
+    // An installed shop is never erased, even if a shop/redact arrives.
+    expect((await signedWebhook('shop/redact', domains[0]!, `shop-redact-a-${suffix}`)).status).toBe(200)
+    expect(await prisma.merchant.findUnique({ where: { id: merchantA } })).not.toBeNull()
+
+    // merchantB was uninstalled by the previous test: everything is erased.
+    await prisma.agentQuery.create({
+      data: { merchantId: merchantB, agentId: 'gdpr', queryText: `gift idea ${suffix}` },
+    })
+    expect((await signedWebhook('shop/redact', domains[1]!, `shop-redact-b-${suffix}`)).status).toBe(200)
+    expect(await prisma.merchant.findUnique({ where: { id: merchantB } })).toBeNull()
+    expect(await prisma.productEnriched.findUnique({ where: { id: productB } })).toBeNull()
+    expect(await prisma.agentQuery.count({ where: { queryText: `gift idea ${suffix}` } })).toBe(0)
+  })
+
+  it('purges agent queries past their retention period', async () => {
+    const old = await prisma.agentQuery.create({
+      data: {
+        merchantId: merchantA,
+        agentId: 'retention',
+        queryText: 'old query',
+        createdAt: new Date(Date.now() - 400 * 86_400_000),
+      },
+    })
+    const fresh = await prisma.agentQuery.create({
+      data: { merchantId: merchantA, agentId: 'retention', queryText: 'fresh query' },
+    })
+    const result = await runRetention()
+    expect(result.agentQueries).toBeGreaterThanOrEqual(1)
+    expect(await prisma.agentQuery.findUnique({ where: { id: old.id } })).toBeNull()
+    expect(await prisma.agentQuery.findUnique({ where: { id: fresh.id } })).not.toBeNull()
+  })
+
+  it('invalidates a merchant search cache in one step', async () => {
+    const request = { query: 'shoe', limit: 5 }
+    const before = await searchCacheKey(merchantA, request)
+    expect(before).toBe(await searchCacheKey(merchantA, request))
+    await invalidateMerchantSearchCache(merchantA)
+    const after = await searchCacheKey(merchantA, request)
+    expect(after).not.toBeNull()
+    expect(after).not.toBe(before)
   })
 
   it('reports dependency readiness and protects operational metrics', async () => {

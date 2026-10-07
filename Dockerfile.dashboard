@@ -30,4 +30,6 @@ RUN pnpm --filter @cap/dashboard... build
 ENV NODE_ENV=production
 EXPOSE 3001
 
-CMD ["pnpm", "--filter", "@cap/dashboard", "start"]
+# exec keeps Next.js as PID 1 so it receives SIGTERM and drains on deploys
+# (pnpm does not forward signals). Render injects PORT.
+CMD ["sh", "-c", "cd apps/dashboard && exec node node_modules/next/dist/bin/next start --port \"${PORT:-3001}\""]

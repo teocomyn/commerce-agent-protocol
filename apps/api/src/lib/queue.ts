@@ -29,6 +29,17 @@ export const catalogSyncQueue = new Queue('catalog-sync', {
   },
 })
 
+// Daily housekeeping (data retention). Processed by the catalog worker.
+export const maintenanceQueue = new Queue('maintenance', {
+  connection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 60_000 },
+    removeOnComplete: { count: 30 },
+    removeOnFail: { count: 30 },
+  },
+})
+
 export const deadLetterQueue = new Queue('dead-letter', {
   connection,
   defaultJobOptions: {
@@ -85,15 +96,17 @@ export type CatalogSyncJobData = FullCatalogSyncJobData | InventorySyncJobData
 // ============================================================
 
 export async function getQueueStats() {
-  const [enrichmentCounts, catalogCounts, deadLetterCounts] = await Promise.all([
+  const [enrichmentCounts, catalogCounts, maintenanceCounts, deadLetterCounts] = await Promise.all([
     enrichmentQueue.getJobCounts('waiting', 'active', 'completed', 'failed'),
     catalogSyncQueue.getJobCounts('waiting', 'active', 'completed', 'failed'),
+    maintenanceQueue.getJobCounts('waiting', 'active', 'completed', 'failed'),
     deadLetterQueue.getJobCounts('waiting', 'active', 'completed', 'failed'),
   ])
 
   return {
     enrichment: enrichmentCounts,
     catalogSync: catalogCounts,
+    maintenance: maintenanceCounts,
     deadLetter: deadLetterCounts,
   }
 }
