@@ -203,6 +203,26 @@ describe.sequential('enrichment pipeline', () => {
     expect(results.filter((result) => 'skipped' in result && result.skipped === 'stale').length).toBeLessThanOrEqual(1)
   })
 
+  it('keeps the enriched row of a revision stored while the LLM call ran', async () => {
+    await seedEnrichedProduct()
+    const seeded = await enrichedRow()
+    // An overlapping job stores a newer revision during this job's embedding.
+    embeddingsCreateMock.mockImplementationOnce(async () => {
+      await prisma.productRaw.updateMany({
+        where: { merchantId },
+        data: { shopifyUpdatedAt: new Date(Date.now() + 60_000) },
+      })
+      return { data: [{ embedding: Array.from({ length: 1536 }, () => 0.01) }] }
+    })
+    fetchShopifyProductMock.mockResolvedValueOnce(product({
+      body_html: '<p>Changed copy.</p>',
+      variants: [{ ...product().variants[0]!, price: '80.00' }],
+    }))
+    const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
+    expect(result).toMatchObject({ skipped: 'stale' })
+    expect(Number((await enrichedRow()).productEnriched?.priceMin)).toBe(Number(seeded.productEnriched?.priceMin))
+  })
+
   it('enriches again when the description changes', async () => {
     await seedEnrichedProduct()
     fetchShopifyProductMock.mockResolvedValueOnce(product({ body_html: '<p>Black leather sneaker.</p>' }))

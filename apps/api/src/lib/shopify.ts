@@ -2,7 +2,16 @@ import crypto from 'node:crypto'
 import { decodeCanonicalKey } from './secrets.js'
 
 export const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION ?? '2026-07'
-const SHOPIFY_TIMEOUT_MS = Number(process.env.SHOPIFY_TIMEOUT_MS ?? 10_000)
+const DEFAULT_SHOPIFY_TIMEOUT_MS = 10_000
+const configuredTimeout = Number(process.env.SHOPIFY_TIMEOUT_MS ?? DEFAULT_SHOPIFY_TIMEOUT_MS)
+// An invalid value would make every request throw and SHOPIFY_MAX_CALL_MS NaN
+// (an idempotency lease that never expires): fall back to the default.
+const SHOPIFY_TIMEOUT_MS = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+  ? configuredTimeout
+  : DEFAULT_SHOPIFY_TIMEOUT_MS
+if (SHOPIFY_TIMEOUT_MS !== configuredTimeout) {
+  console.warn(`[Shopify] Ignoring invalid SHOPIFY_TIMEOUT_MS=${process.env.SHOPIFY_TIMEOUT_MS}; using ${DEFAULT_SHOPIFY_TIMEOUT_MS} ms`)
+}
 const SHOPIFY_ATTEMPTS = 3
 // Retry-After is honoured up to this bound, so one Shopify call has a hard
 // upper duration that callers (checkout idempotency) can rely on.

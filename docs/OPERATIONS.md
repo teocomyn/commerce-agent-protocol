@@ -68,7 +68,7 @@ If Redis becomes unavailable, API commands fail after about two seconds instead 
 
 `POST /internal/operations/catalog-sync` with `{"confirm":true}` queues a full catalog sync for every active install and returns `{ "queued": n, "ignored": m }`: a shop whose full sync (from an install, an earlier resync, a re-enrichment or any other producer) is still waiting or running is not queued again and counts as ignored. Use it after a release that changes stored product data outside enrichment. It calls Shopify for every product, but OpenAI only for active products whose title, description, vendor, type, tags or images changed since their last enrichment. Run it once, not on a schedule.
 
-A release that bumps `ENRICHMENT_VERSION` needs no manual step: when the catalog worker starts, it queues one full sync (delayed 10 minutes, so every service runs the new release first) for each active shop whose last full sync ran under another version. Expect one OpenAI call per active product of those shops.
+A release that bumps `ENRICHMENT_VERSION` needs no manual step: when the catalog worker starts, it queues one full sync (delayed 10 minutes, so every service runs the new release first) for each active shop whose last full sync ran under another version, and the job is skipped if a full sync already ran under the new version by the time it starts. Expect one OpenAI call per active product of those shops.
 
 A full sync reads every product, active or not, so a product that became a draft or was archived while its webhook was missed is hidden on the next sync. Inactive products only have their stored status updated: they are not enriched and get no inventory job.
 

@@ -18,7 +18,9 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
   "img-src 'self' data: https://*.shopify.com https://*.myshopify.com",
-  `connect-src 'self'${development ? ' ws: wss:' : ''}`,
+  // The font origins are listed for the <link rel="preconnect"> hints in
+  // app/layout.tsx, which browsers check against connect-src.
+  `connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com${development ? ' ws: wss:' : ''}`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "object-src 'none'",

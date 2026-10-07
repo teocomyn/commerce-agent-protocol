@@ -12,7 +12,7 @@ import {
 } from '../lib/queue.js'
 import { runRetention } from '../lib/retention.js'
 import { ENRICHMENT_VERSION } from '../lib/enrichment-output.js'
-import { queueOutdatedEnrichmentResyncs } from '../lib/enrichment-backfill.js'
+import { fullSyncRanUnder, queueOutdatedEnrichmentResyncs } from '../lib/enrichment-backfill.js'
 import { fetchShopifyInventorySnapshot, fetchShopifyProducts } from '../lib/shopify.js'
 import { InactiveInstallError, getValidShopifyAdminToken } from '../lib/shopify-token.js'
 import { applyInventorySnapshot } from '../lib/inventory.js'
@@ -74,7 +74,14 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
       return { inventoryItemId: snapshot.inventory_item_id, productsUpdated: products.length }
     }
 
-    const { cursor } = job.data
+    const { cursor, unlessEnrichmentVersion } = job.data
+
+    if (unlessEnrichmentVersion) {
+      if (await fullSyncRanUnder(merchantId, unlessEnrichmentVersion)) {
+        console.log(`[CatalogSync] Skipping job ${job.id}: ${shopDomain} was already synced under ${unlessEnrichmentVersion}`)
+        return { skipped: 'enrichment-current' }
+      }
+    }
 
     console.log(`[CatalogSync] Starting sync for ${shopDomain} (cursor: ${cursor ?? 'start'})`)
 

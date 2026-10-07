@@ -17,7 +17,8 @@ import {
   searchCacheKey,
 } from '../lib/redis.js'
 import { runRetention } from '../lib/retention.js'
-import { queueOutdatedEnrichmentResyncs } from '../lib/enrichment-backfill.js'
+import { apiKeyCacheKey } from '@cap/shared'
+import { fullSyncRanUnder, queueOutdatedEnrichmentResyncs } from '../lib/enrichment-backfill.js'
 import { ENRICHMENT_VERSION } from '../lib/enrichment-output.js'
 import {
   catalogSyncQueue,
@@ -159,7 +160,7 @@ describe.sequential('CAP integration boundaries', () => {
 
   afterAll(async () => {
     await prisma.merchant.deleteMany({ where: { shopifyDomain: { in: domains } } })
-    await redis.del(`apikey:${validKeyHash}`, `rl:${validKeyHash}`)
+    await redis.del(apiKeyCacheKey(validKeyHash), `rl:${validKeyHash}`)
     await prisma.$disconnect()
     await Promise.all([
       enrichmentQueue.close(),
@@ -180,7 +181,7 @@ describe.sequential('CAP integration boundaries', () => {
     const response = await protectedApp().request('/', { headers: { 'X-CAP-Key': validKey } })
     expect(response.status).toBe(200)
     expect(await response.json()).toMatchObject({ merchantId: merchantA, plan: 'free' })
-    expect(await redis.exists(`apikey:${validKeyHash}`)).toBe(1)
+    expect(await redis.exists(apiKeyCacheKey(validKeyHash))).toBe(1)
   })
 
   it('rejects a revoked key immediately after cache invalidation', async () => {
@@ -199,9 +200,9 @@ describe.sequential('CAP integration boundaries', () => {
     await invalidateApiKeyCache([hash])
     // A lookup that read the key from Postgres before the revocation fills
     // the cache only now: the tombstone must win.
-    await cacheSetIfAbsent(`apikey:${hash}`, { merchantId: merchantA, apiKeyId: 'stale', plan: 'free' }, 60)
+    await cacheSetIfAbsent(apiKeyCacheKey(hash), { merchantId: merchantA, apiKeyId: 'stale', plan: 'free' }, 60)
     expect((await protectedApp().request('/', { headers: { 'X-CAP-Key': key } })).status).toBe(401)
-    await redis.del(`apikey:${hash}`, `rl:${hash}`)
+    await redis.del(apiKeyCacheKey(hash), `rl:${hash}`)
   })
 
   it('enforces tenant isolation in compare', async () => {
@@ -710,7 +711,7 @@ describe.sequential('CAP integration boundaries', () => {
     }
     expect(response?.status).toBe(429)
     const hash = crypto.createHash('sha256').update(key).digest('hex')
-    await redis.del(`apikey:${hash}`, `rl:${hash}`)
+    await redis.del(apiKeyCacheKey(hash), `rl:${hash}`)
   })
 
   it('revokes credentials when Shopify uninstalls the app', async () => {
@@ -789,11 +790,11 @@ describe.sequential('CAP integration boundaries', () => {
     })
     const keyB = await createKey(merchantB, 'gdpr-cached-key')
     const keyBHash = crypto.createHash('sha256').update(keyB).digest('hex')
-    await redis.set(`apikey:${keyBHash}`, JSON.stringify({ merchantId: merchantB }))
+    await redis.set(apiKeyCacheKey(keyBHash), JSON.stringify({ merchantId: merchantB }))
     const cachedSearch = await searchCacheKey(merchantB, { query: 'gdpr' })
     await redis.set(cachedSearch!, JSON.stringify({ results: [] }), 'EX', 120)
     expect((await signedWebhook('shop/redact', domains[1]!, `shop-redact-b-${suffix}`)).status).toBe(200)
-    expect(JSON.parse(await redis.get(`apikey:${keyBHash}`) ?? 'null')).toBe('invalidated')
+    expect(JSON.parse(await redis.get(apiKeyCacheKey(keyBHash)) ?? 'null')).toBe('invalidated')
     // Erased, not just hidden: no cached search of the shop is left.
     expect(await redis.exists(cachedSearch!, `search:gen:${merchantB}`)).toBe(0)
     expect(await prisma.merchant.findUnique({ where: { id: merchantB } })).toBeNull()
@@ -931,6 +932,9 @@ describe.sequential('CAP integration boundaries', () => {
       // A restart (or a second worker) does not queue the same shop twice.
       await queueOutdatedEnrichmentResyncs()
       expect(await queuedFor()).toHaveLength(1)
+      // The job re-checks the version when it runs (see the catalog worker).
+      expect((await queuedFor())[0]!.data).toMatchObject({ unlessEnrichmentVersion: ENRICHMENT_VERSION })
+      expect(await fullSyncRanUnder(merchantA, ENRICHMENT_VERSION)).toBe(false)
 
       // Once a full sync ran under the current version, nothing is queued.
       await Promise.all((await queuedFor()).map((job) => job.remove()))
@@ -938,6 +942,7 @@ describe.sequential('CAP integration boundaries', () => {
         UPDATE merchants SET settings = settings || ${JSON.stringify({ enrichmentVersion: ENRICHMENT_VERSION })}::jsonb
         WHERE id = ${merchantA}::uuid
       `
+      expect(await fullSyncRanUnder(merchantA, ENRICHMENT_VERSION)).toBe(true)
       await queueOutdatedEnrichmentResyncs()
       expect(await queuedFor()).toHaveLength(0)
     } finally {

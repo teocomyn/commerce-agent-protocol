@@ -63,7 +63,7 @@ Diagrams: [`cap_system_architecture_overview.svg`](./cap_system_architecture_ove
 
 ## Quick start
 
-**Requirements:** Node ≥ 22, pnpm ≥ 9, Docker.
+**Requirements:** Node ≥ 22.9, pnpm ≥ 9, Docker.
 
 ```bash
 # 1. Local Postgres (with pgvector) + Redis

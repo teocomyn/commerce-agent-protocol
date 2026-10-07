@@ -50,9 +50,14 @@ export const maintenanceQueue = new Queue('maintenance', {
 export async function queueFullCatalogSync(
   merchantId: string,
   shopDomain: string,
-  options: { jobId: string; delay?: number; priority?: number },
+  options: { jobId: string; delay?: number; priority?: number; unlessEnrichmentVersion?: string },
 ): Promise<boolean> {
-  const job = await catalogSyncQueue.add('full-catalog-sync', { merchantId, shopDomain }, {
+  const data: FullCatalogSyncJobData = {
+    merchantId,
+    shopDomain,
+    ...(options.unlessEnrichmentVersion && { unlessEnrichmentVersion: options.unlessEnrichmentVersion }),
+  }
+  const job = await catalogSyncQueue.add('full-catalog-sync', data, {
     jobId: options.jobId,
     deduplication: { id: `full-sync-${merchantId}` },
     ...(options.delay !== undefined && { delay: options.delay }),
@@ -120,6 +125,11 @@ export interface FullCatalogSyncJobData {
   shopDomain: string
   kind?: 'full-catalog'
   cursor?: string // Pagination cursor for resume
+  /**
+   * Re-enrichment after a release: skipped when, by the time it runs, a full
+   * sync already ran under this ENRICHMENT_VERSION (install or manual resync).
+   */
+  unlessEnrichmentVersion?: string
 }
 
 export interface InventorySyncJobData {

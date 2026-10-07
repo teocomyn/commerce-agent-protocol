@@ -8,5 +8,7 @@
 export const API_KEY_CACHE_TTL_SECONDS = 60
 export const API_KEY_CACHE_TOMBSTONE = 'invalidated'
 
-export const apiKeyCacheKey = (keyHash: string) => `apikey:${keyHash}`
+// v2: entries written by releases before the tombstone scheme (5-minute TTL,
+// no tombstone) live under `apikey:<hash>` and are never read again.
+export const apiKeyCacheKey = (keyHash: string) => `apikey:v2:${keyHash}`
 export const apiKeyRateLimitKey = (keyHash: string) => `rl:${keyHash}`

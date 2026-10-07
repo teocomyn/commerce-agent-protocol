@@ -6,6 +6,14 @@ import { queueFullCatalogSync } from './queue.js'
 // products are enriched again, so no job is processed by an older worker.
 const BACKFILL_DELAY_MS = 10 * 60 * 1_000
 
+/** Whether the shop's last completed full sync ran under `version`. */
+export async function fullSyncRanUnder(merchantId: string, version: string): Promise<boolean> {
+  const [merchant] = await prisma.$queryRaw<Array<{ version: string | null }>>`
+    SELECT settings->>'enrichmentVersion' AS version FROM merchants WHERE id = ${merchantId}::uuid
+  `
+  return merchant?.version === version
+}
+
 /**
  * Products enriched by an older release (a new prompt or normalization, or
  * claims cleared by a migration) are enriched again without an operator step:
@@ -30,6 +38,9 @@ export async function queueOutdatedEnrichmentResyncs(): Promise<number> {
       jobId: `enrichment-version-${ENRICHMENT_VERSION}-${merchant.id}-${requestedAt}`,
       delay: BACKFILL_DELAY_MS,
       priority: 5,
+      // A full sync may run under the new version before this one (install,
+      // manual resync): then this job has nothing left to do.
+      unlessEnrichmentVersion: ENRICHMENT_VERSION,
     },
   )))
   return queued.filter(Boolean).length

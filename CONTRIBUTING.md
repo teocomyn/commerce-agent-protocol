@@ -21,7 +21,7 @@ This project follows the [Contributor Covenant](./CODE_OF_CONDUCT.md). Be excell
 
 ### Requirements
 
-- **Node** ≥ 22
+- **Node** ≥ 22.9
 - **pnpm** ≥ 9 (`corepack enable && corepack prepare pnpm@9 --activate`)
 - **Docker** (for local Postgres + Redis)
 

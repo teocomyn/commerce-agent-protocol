@@ -373,9 +373,20 @@ export async function runEnrichmentJob(
   const shippingInfo = normalized.shippingInfo ? JSON.stringify(normalized.shippingInfo) : null
   const returnPolicy = normalized.returnPolicy ? JSON.stringify(normalized.returnPolicy) : null
 
+  // The LLM call takes seconds: a newer revision of the product may have been
+  // stored meanwhile by an overlapping job, which writes its own enriched row.
+  // This job's (older) prices, policies and claims must not replace it.
+  const stillCurrent = knownRevision
+    ? Prisma.sql`NOT EXISTS (
+        SELECT 1 FROM products_raw AS newer
+        WHERE newer.id = ${rawProduct.id}::uuid AND newer.shopify_updated_at > ${shopifyUpdatedAt}
+      )`
+    : Prisma.sql`TRUE`
+
+  let enrichedRows: number
   if (contentUnchanged) {
     // Commercial data (prices, policies, merchant claims) still changes.
-    await prisma.$executeRaw`
+    enrichedRows = await prisma.$executeRaw`
       UPDATE products_enriched SET
         certifications = ${normalized.certifications}::text[],
         comparison_tags = ${normalized.comparisonTags}::text[],
@@ -385,11 +396,11 @@ export async function runEnrichmentJob(
         shipping_info = ${shippingInfo}::jsonb,
         return_policy = ${returnPolicy}::jsonb,
         geo_score = ${geoScore}
-      WHERE product_raw_id = ${rawProduct.id}::uuid
+      WHERE product_raw_id = ${rawProduct.id}::uuid AND ${stillCurrent}
     `
   } else {
     const [categoryPart, subcategoryPart] = (enrichedData.category ?? '').split(' > ')
-    await prisma.$executeRaw`
+    enrichedRows = await prisma.$executeRaw`
       INSERT INTO products_enriched (
         id, product_raw_id, merchant_id,
         category, subcategory, specs, use_cases, target_audience,
@@ -436,7 +447,12 @@ export async function runEnrichmentJob(
         source_hash = EXCLUDED.source_hash,
         enriched_at = NOW(),
         version = products_enriched.version + 1
+      WHERE ${stillCurrent}
     `
+  }
+  if (enrichedRows === 0) {
+    console.log(`[Worker] Product ${shopifyProductId}: a newer revision was stored during enrichment, skipping`)
+    return { productId: rawProduct.id, skipped: 'stale' }
   }
 
   await invalidateMerchantSearchCache(merchantId)
