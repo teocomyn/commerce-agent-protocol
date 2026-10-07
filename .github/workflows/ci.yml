@@ -21,7 +21,7 @@ jobs:
       DATABASE_URL: postgresql://cap_user:cap_password@127.0.0.1:5432/cap_db
       REDIS_URL: redis://127.0.0.1:6379
       OPENAI_API_KEY: sk-ci-placeholder
-      ENCRYPTION_KEY: ci-only-32-byte-encryption-key!!
+      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000c1c1c1
       SHOPIFY_API_SECRET: ci-shopify-secret
       DASHBOARD_SESSION_SECRET: ci-only-dashboard-session-secret-32
     services:
@@ -77,6 +77,9 @@ jobs:
 
       - name: Apply test database migrations
         run: pnpm db:migrate
+
+      - name: Check Prisma schema matches migrations
+        run: pnpm db:check-drift
 
       - name: Typecheck
         run: pnpm typecheck

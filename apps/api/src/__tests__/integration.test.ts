@@ -84,6 +84,7 @@ describe.sequential('CAP integration boundaries', () => {
         merchantId: merchantA,
         shopifyId: BigInt(`1${Date.now()}`),
         title: 'Tenant A Shoe',
+        status: 'active',
         variants: [{ id: 101, inventory_item_id: 9001, price: '29.00', inventory_quantity: 4, title: 'Default' }],
         images: [],
       },
@@ -93,6 +94,7 @@ describe.sequential('CAP integration boundaries', () => {
         merchantId: merchantB,
         shopifyId: BigInt(`2${Date.now()}`),
         title: 'Tenant B Shoe',
+        status: 'active',
         variants: [{ id: 202, inventory_item_id: 9002, price: '39.00', inventory_quantity: 5, title: 'Default' }],
         images: [],
       },
@@ -494,6 +496,34 @@ describe.sequential('CAP integration boundaries', () => {
     await expect(response.json()).resolves.toMatchObject({
       error: { code: 'SHIPPING_COUNTRY_UNAVAILABLE' },
     })
+  })
+
+  it('hides draft products from search, compare and checkout', async () => {
+    await prisma.productRaw.updateMany({ where: { merchantId: merchantA }, data: { status: 'draft' } })
+    try {
+      const app = new Hono()
+      app.use('/v1/*', authMiddleware)
+      app.route('/v1/search', searchRouter)
+      app.route('/v1/checkout', checkoutRouter)
+      const search = await app.request('/v1/search', {
+        method: 'POST',
+        headers: { 'X-CAP-Key': validKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: 'draft visibility check' }),
+      })
+      expect(search.status).toBe(200)
+      const body = await search.json() as { results: Array<{ id: string }> }
+      expect(body.results.map((product) => product.id)).not.toContain(productA)
+
+      const checkout = await app.request('/v1/checkout/initiate', {
+        method: 'POST',
+        headers: { 'X-CAP-Key': validKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_id: productA, quantity: 1, shipping_country: 'FR' }),
+      })
+      expect(checkout.status).toBe(404)
+      await expect(checkout.json()).resolves.toMatchObject({ error: { code: 'PRODUCT_NOT_FOUND' } })
+    } finally {
+      await prisma.productRaw.updateMany({ where: { merchantId: merchantA }, data: { status: 'active' } })
+    }
   })
 
   it('rate limits a key after its plan quota', async () => {

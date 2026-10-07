@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { extractCommercePolicies, supportsShippingCountry } from '../lib/commerce-policies.js'
+import {
+  extractCommercePolicies,
+  extractMerchantClaims,
+  parseMetafieldList,
+  supportsShippingCountry,
+} from '../lib/commerce-policies.js'
 import { extractCheckoutTrackingToken } from '../lib/webhook-utils.js'
 
 describe('commerce metadata normalization', () => {
@@ -84,5 +89,25 @@ describe('commerce metadata normalization', () => {
 
   it('does not fall back to amount or cart token', () => {
     expect(extractCheckoutTrackingToken({ total_price: '10.00', cart_token: 'legacy' })).toBeNull()
+  })
+})
+
+describe('merchant-declared claims', () => {
+  it('reads certifications and comparisons only from cap metafields', () => {
+    expect(extractMerchantClaims([
+      { key: 'certifications', value: '["GOTS","OEKO-TEX"]' },
+      { key: 'comparison_tags', value: 'Model A, Model B' },
+    ])).toEqual({
+      certifications: ['GOTS', 'OEKO-TEX'],
+      comparisonTags: ['Model A', 'Model B'],
+    })
+    expect(extractMerchantClaims([])).toEqual({ certifications: [], comparisonTags: [] })
+  })
+
+  it('normalizes list values and bounds their size', () => {
+    expect(parseMetafieldList(' B-Corp , ,B-Corp,GOTS ')).toEqual(['B-Corp', 'GOTS'])
+    expect(parseMetafieldList('[1, "Fair Trade", null]')).toEqual(['Fair Trade'])
+    expect(parseMetafieldList(Array.from({ length: 30 }, (_, i) => `C${i}`).join(','))).toHaveLength(20)
+    expect(parseMetafieldList(undefined)).toEqual([])
   })
 })

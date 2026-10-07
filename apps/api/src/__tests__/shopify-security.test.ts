@@ -55,9 +55,40 @@ describe('Shopify security helpers', () => {
 
   it('rejects tampered ciphertext', () => {
     const encrypted = encryptToken('secret')
-    const [iv, tag, ciphertext] = encrypted.split(':')
+    const [version, iv, tag, ciphertext] = encrypted.split(':')
+    expect(version).toBe('v2')
     const tamperedTag = `${tag?.startsWith('0') ? '1' : '0'}${tag?.slice(1)}`
-    expect(() => decryptToken(`${iv}:${tamperedTag}:${ciphertext}`)).toThrow()
+    expect(() => decryptToken(`${version}:${iv}:${tamperedTag}:${ciphertext}`)).toThrow()
+  })
+
+  it('uses the full 32 bytes of a hex key and still reads legacy ciphertexts', () => {
+    const hexKey = 'a1'.repeat(32)
+    process.env.ENCRYPTION_KEY = hexKey
+    // Legacy v1 format: first 32 UTF-8 bytes of the key string, 16-byte IV, no prefix.
+    const iv = crypto.randomBytes(16)
+    const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(hexKey, 'utf8').subarray(0, 32), iv)
+    const encrypted = Buffer.concat([cipher.update('legacy-token', 'utf8'), cipher.final()])
+    const legacy = `${iv.toString('hex')}:${cipher.getAuthTag().toString('hex')}:${encrypted.toString('hex')}`
+    expect(decryptToken(legacy)).toBe('legacy-token')
+
+    const current = encryptToken('current-token')
+    process.env.ENCRYPTION_KEY = 'a1'.repeat(16) + 'b2'.repeat(16)
+    expect(() => decryptToken(current)).toThrow()
+    process.env.ENCRYPTION_KEY = hexKey
+    expect(decryptToken(current)).toBe('current-token')
+  })
+
+  it('reads tokens encrypted with the previous key during rotation', () => {
+    process.env.ENCRYPTION_KEY = 'c3'.repeat(32)
+    const beforeRotation = encryptToken('rotated-token')
+    process.env.ENCRYPTION_KEY_PREVIOUS = process.env.ENCRYPTION_KEY
+    process.env.ENCRYPTION_KEY = 'd4'.repeat(32)
+    try {
+      expect(decryptToken(beforeRotation)).toBe('rotated-token')
+    } finally {
+      delete process.env.ENCRYPTION_KEY_PREVIOUS
+      process.env.ENCRYPTION_KEY = '12345678901234567890123456789012'
+    }
   })
 
   it('rejects an undersized encryption key', () => {

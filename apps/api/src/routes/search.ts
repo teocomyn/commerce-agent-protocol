@@ -110,7 +110,8 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
   }
 
   // Build SQL filters with bound parameters (no string concat for user input)
-  const conditions: string[] = ['pe.deleted_at IS NULL']
+  // Only active, non-deleted Shopify products are visible to agents.
+  const conditions: string[] = ['pe.deleted_at IS NULL', 'pr.deleted_at IS NULL', "pr.status = 'active'"]
   const params: (string | number | boolean | string[])[] = []
   let paramIdx = 1
 
@@ -279,7 +280,6 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
       merchant: {
         name: row.shopify_domain.replace('.myshopify.com', '').replace(/-/g, ' '),
         domain: row.shopify_domain,
-        trust_score: Math.min(100, row.geo_score + 10),
       },
       price: {
         amount: priceAmount,

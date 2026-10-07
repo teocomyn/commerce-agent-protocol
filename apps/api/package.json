@@ -10,11 +10,13 @@
     "dev:worker:enrichment": "tsx watch --env-file=../../.env src/workers/enrichment.worker.ts",
     "dev:worker:catalog": "tsx watch --env-file=../../.env src/workers/catalog-sync.worker.ts",
     "dev:workers": "concurrently -n enrich,sync -c cyan,magenta \"pnpm run dev:worker:enrichment\" \"pnpm run dev:worker:catalog\"",
+    "mcp": "tsx --env-file=../../.env src/mcp/stdio.ts",
     "seed": "tsx --env-file=../../.env src/scripts/seed.ts",
     "build": "tsc && tsc-alias",
     "start": "node --env-file-if-exists=../../.env dist/apps/api/src/index.js",
     "start:worker:enrichment": "node --env-file-if-exists=../../.env dist/apps/api/src/workers/enrichment.worker.js",
     "start:worker:catalog": "node --env-file-if-exists=../../.env dist/apps/api/src/workers/catalog-sync.worker.js",
+    "start:mcp": "node --env-file-if-exists=../../.env dist/apps/api/src/mcp/stdio.js",
     "lint": "tsc --noEmit",
     "test": "NODE_ENV=test node --env-file-if-exists=../../.env ./node_modules/vitest/vitest.mjs run",
     "clean": "rm -rf dist"

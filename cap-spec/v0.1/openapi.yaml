@@ -210,7 +210,6 @@ components:
           properties:
             name:        { type: string }
             domain:      { type: string }
-            trust_score: { type: number }
         price:        { $ref: '#/components/schemas/Money' }
         variants:
           type: array
@@ -224,7 +223,10 @@ components:
               available_quantity: { type: integer }
               in_stock: { type: boolean }
         specs:        { type: object, additionalProperties: true }
-        certifications: { type: array, items: { type: string } }
+        certifications:
+          type: array
+          items: { type: string }
+          description: Certifications declared by the merchant. Servers MUST NOT generate them.
         availability: { $ref: '#/components/schemas/Availability' }
         images:       { type: array, items: { type: string, format: uri } }
         geo_score:    { type: number, minimum: 0, maximum: 100 }
@@ -274,7 +276,9 @@ components:
           required: [matrix]
           properties:
             winner_by_price: { type: string }
-            winner_by_eco:   { type: string }
+            winner_by_certifications:
+              type: string
+              description: Product with the most merchant-declared certifications. Not an environmental rating.
             matrix:
               type: object
               additionalProperties:

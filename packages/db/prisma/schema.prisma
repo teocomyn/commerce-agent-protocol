@@ -29,7 +29,7 @@ model Merchant {
   plan                  String    @default("free") @db.VarChar(50)
   settings              Json      @default("{}") @db.JsonB
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   productsRaw          ProductRaw[]
   productsEnriched     ProductEnriched[]
@@ -57,7 +57,7 @@ model User {
   name         String?  @db.VarChar(255)
   passwordHash String?  @map("password_hash")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   memberships          MerchantMember[]
   dashboardLoginTokens DashboardLoginToken[]
@@ -77,7 +77,7 @@ model MerchantInvitation {
   acceptedAt      DateTime?    @map("accepted_at") @db.Timestamptz
   revokedAt       DateTime?    @map("revoked_at") @db.Timestamptz
   createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+  updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   merchant  Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   invitedBy User     @relation(fields: [invitedByUserId], references: [id], onDelete: Cascade)
@@ -94,7 +94,7 @@ model MerchantMember {
   role       MerchantRole @default(ANALYST)
   revokedAt  DateTime?    @map("revoked_at") @db.Timestamptz
   createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt  DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+  updatedAt  DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
@@ -147,7 +147,7 @@ model ProductRaw {
   description String?
   vendor      String?   @db.VarChar(255)
   productType String?   @map("product_type") @db.VarChar(255)
-  tags        String[]
+  tags        String[]  @default([])
   variants    Json      @db.JsonB // price, SKU, stock, options
   images      Json?     @db.JsonB
   metafields  Json?     @db.JsonB
@@ -173,13 +173,13 @@ model ProductEnriched {
   // Structured data (LLM-generated)
   category       String?  @db.VarChar(255)
   subcategory    String?  @db.VarChar(255)
-  specs          Json     @db.JsonB // {"material": "cotton", ...}
-  useCases       String[] @map("use_cases")
-  targetAudience String[] @map("target_audience")
-  certifications String[]
+  specs          Json     @default("{}") @db.JsonB // {"material": "cotton", ...}
+  useCases       String[] @default([]) @map("use_cases")
+  targetAudience String[] @default([]) @map("target_audience")
+  certifications String[] @default([]) // merchant metafield cap.certifications only
   careInfo       String?  @map("care_info")
   sizeGuide      Json?    @map("size_guide") @db.JsonB
-  comparisonTags String[] @map("comparison_tags")
+  comparisonTags String[] @default([]) @map("comparison_tags") // merchant metafield cap.comparison_tags only
 
   // Transactional data
   priceMin     Decimal? @map("price_min") @db.Decimal(10, 2)
@@ -192,12 +192,13 @@ model ProductEnriched {
   geoScore     Float @default(0) @map("geo_score")
   completeness Float @default(0)
 
-  // Vector embedding (1536 dims — text-embedding-3-small)
-  // Stored as Unsupported because Prisma doesn't natively support pgvector
-  // We use raw SQL for vector operations
-  enrichedAt DateTime  @default(now()) @map("enriched_at") @db.Timestamptz
-  version    Int       @default(1)
-  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz
+  // Vector embedding (1536 dims, text-embedding-3-small). Declared so that
+  // `prisma migrate dev` never generates a migration dropping it; read and
+  // written with raw SQL only.
+  embedding  Unsupported("vector(1536)")?
+  enrichedAt DateTime                     @default(now()) @map("enriched_at") @db.Timestamptz
+  version    Int                          @default(1)
+  deletedAt  DateTime?                    @map("deleted_at") @db.Timestamptz
 
   productRaw     ProductRaw      @relation(fields: [productRawId], references: [id], onDelete: Cascade)
   merchant       Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
@@ -270,8 +271,8 @@ model AgentCheckout {
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   agentQuery      AgentQuery?     @relation(fields: [agentQueryId], references: [id])
-  merchant        Merchant        @relation(fields: [merchantId], references: [id])
-  productEnriched ProductEnriched @relation(fields: [productId], references: [id])
+  merchant        Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  productEnriched ProductEnriched @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@map("agent_checkouts")
 }

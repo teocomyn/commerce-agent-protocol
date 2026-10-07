@@ -11,6 +11,7 @@ import { webhookRouter } from './routes/webhooks.js'
 import { oauthRouter } from './routes/shopify/oauth.js'
 import { checkReadiness, operationsRouter } from './routes/operations.js'
 import { authMiddleware } from './middleware/auth.js'
+import { assertRuntimeSecrets } from './lib/secrets.js'
 import type { CAPError } from '@cap/shared'
 
 const app = new Hono()
@@ -99,6 +100,14 @@ app.get('/openapi.json', async (c) => {
             },
           },
         },
+        Money: {
+          type: 'object',
+          required: ['amount', 'currency'],
+          properties: {
+            amount: { type: 'number' },
+            currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+          },
+        },
         SearchFilters: {
           type: 'object',
           properties: {
@@ -122,7 +131,6 @@ app.get('/openapi.json', async (c) => {
               properties: {
                 name: { type: 'string' },
                 domain: { type: 'string' },
-                trust_score: { type: 'number' },
               },
             },
             price: {
@@ -425,6 +433,8 @@ app.notFound((c) => c.json<CAPError>({
 
 const port = parseInt(process.env.PORT ?? process.env.API_PORT ?? '3000')
 
+assertRuntimeSecrets()
+
 // Only start HTTP server if not in MCP mode
 if (process.env.MCP_MODE !== 'true') {
   serve({ fetch: app.fetch, port }, (info) => {
@@ -438,7 +448,9 @@ if (process.env.MCP_MODE !== 'true') {
     `)
   })
 } else {
-  // Start MCP server
+  // Prefer `pnpm --silent --filter @cap/api mcp`, which skips the HTTP stack.
+  const { routeConsoleToStderr } = await import('./mcp/console.js')
+  routeConsoleToStderr()
   const { startMcpServer } = await import('./mcp/server.js')
   await startMcpServer()
 }

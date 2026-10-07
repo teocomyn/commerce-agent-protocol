@@ -1,0 +1,64 @@
+import { describe, expect, it } from 'vitest'
+import {
+  LLM_ENRICHMENT_JSON_SCHEMA,
+  LlmEnrichmentSchema,
+  normalizeLlmEnrichment,
+} from '../lib/enrichment-output.js'
+
+type JsonSchema = {
+  type?: unknown
+  properties?: Record<string, JsonSchema>
+  required?: string[]
+  additionalProperties?: unknown
+  items?: JsonSchema
+  anyOf?: JsonSchema[]
+}
+
+// OpenAI strict structured outputs reject any object that is open or has
+// optional keys, which would make every enrichment job fail.
+function assertStrictCompatible(schema: JsonSchema, path = '$'): void {
+  if (schema.properties) {
+    expect(schema.additionalProperties, `${path} must be closed`).toBe(false)
+    expect([...(schema.required ?? [])].sort(), `${path} must require every key`)
+      .toEqual(Object.keys(schema.properties).sort())
+    for (const [key, child] of Object.entries(schema.properties)) {
+      assertStrictCompatible(child, `${path}.${key}`)
+    }
+  } else if (schema.type === 'object') {
+    throw new Error(`${path} is a free-form object, which strict mode rejects`)
+  }
+  if (schema.items) assertStrictCompatible(schema.items, `${path}[]`)
+  for (const [index, option] of (schema.anyOf ?? []).entries()) {
+    assertStrictCompatible(option, `${path}|${index}`)
+  }
+}
+
+describe('LLM enrichment output', () => {
+  it('uses a JSON schema accepted by strict structured outputs', () => {
+    assertStrictCompatible(LLM_ENRICHMENT_JSON_SCHEMA as JsonSchema)
+    expect(Object.keys(LLM_ENRICHMENT_JSON_SCHEMA.properties)).not.toContain('certifications')
+    expect(Object.keys(LLM_ENRICHMENT_JSON_SCHEMA.properties)).not.toContain('comparison_tags')
+  })
+
+  it('normalizes array-shaped specs and size guides', () => {
+    const output = LlmEnrichmentSchema.parse({
+      category: 'Footwear > Sneakers',
+      subcategory: 'Sneakers',
+      specs: [{ name: 'weight_g', value: 310 }, { name: ' ', value: 'ignored' }],
+      use_cases: ['city'],
+      target_audience: ['adults'],
+      care_info: null,
+      size_guide: [{ size: '42', measurements: '27 cm' }],
+      summary: 'A leather sneaker.',
+    })
+    expect(normalizeLlmEnrichment(output)).toEqual({
+      category: 'Footwear > Sneakers',
+      subcategory: 'Sneakers',
+      specs: { weight_g: 310 },
+      use_cases: ['city'],
+      target_audience: ['adults'],
+      size_guide: { '42': '27 cm' },
+      summary: 'A leather sneaker.',
+    })
+  })
+})

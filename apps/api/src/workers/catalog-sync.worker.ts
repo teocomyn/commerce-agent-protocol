@@ -5,6 +5,9 @@ import { fetchShopifyInventorySnapshot, fetchShopifyProducts } from '../lib/shop
 import { getValidShopifyAdminToken } from '../lib/shopify-token.js'
 import { applyInventorySnapshot } from '../lib/inventory.js'
 import { invalidateMerchantSearchCache } from '../lib/redis.js'
+import { assertRuntimeSecrets } from '../lib/secrets.js'
+
+assertRuntimeSecrets()
 
 export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
   'catalog-sync',
