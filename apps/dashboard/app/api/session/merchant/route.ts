@@ -1,11 +1,16 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { z } from 'zod'
 import { prisma } from '@cap/db'
+import { parseJsonBody } from '@/lib/api-route'
 import {
   createDashboardSessionToken,
   dashboardSessionCookie,
   isSameOriginMutation,
+  membershipVersion,
 } from '@/lib/dashboard-session'
 import { findPendingOwnerLoginToken, isOwnerLoginTokenFormat } from '@/lib/owner-login'
+
+const ownerSessionSchema = z.object({ token: z.string() })
 
 /**
  * Landing URL of the cross-site redirect from the API after Shopify OAuth.
@@ -28,8 +33,9 @@ export async function POST(req: NextRequest) {
   if (!isSameOriginMutation(req)) {
     return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })
   }
-  const body = await req.json().catch(() => null) as { token?: unknown } | null
-  const rawToken = typeof body?.token === 'string' ? body.token : ''
+  const body = await parseJsonBody(req, ownerSessionSchema, 'A login token is required')
+  if (!body.ok) return body.response
+  const rawToken = body.value.token
 
   const now = new Date()
   const loginToken = await findPendingOwnerLoginToken(rawToken, now)
@@ -44,7 +50,7 @@ export async function POST(req: NextRequest) {
         merchantId: loginToken.merchantId,
       },
     },
-    select: { role: true, revokedAt: true },
+    select: { role: true, revokedAt: true, updatedAt: true },
   })
   if (!membership || membership.revokedAt) {
     return NextResponse.json({ error: 'Membership is not active' }, { status: 403 })
@@ -62,6 +68,7 @@ export async function POST(req: NextRequest) {
     userId: loginToken.userId,
     merchantId: loginToken.merchantId,
     role: membership.role,
+    mv: membershipVersion(membership.updatedAt),
   })
   const response = NextResponse.json({ authenticated: true, redirect: '/dashboard' })
   const cookie = dashboardSessionCookie(sessionToken)

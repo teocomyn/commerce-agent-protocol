@@ -78,12 +78,12 @@ export default function AcceptInvitationForm({
       </label>
       <label style={{ display: 'grid', gap: 7, fontSize: 13 }}>
         Password
-        <input style={inputStyle} type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} />
+        <input style={inputStyle} type="password" autoComplete="new-password" required minLength={12} maxLength={256} value={password} onChange={(event) => setPassword(event.target.value)} />
         <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>12 characters minimum.</span>
       </label>
       <label style={{ display: 'grid', gap: 7, fontSize: 13 }}>
         Confirm password
-        <input style={inputStyle} type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
+        <input style={inputStyle} type="password" autoComplete="new-password" required minLength={12} maxLength={256} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
       </label>
       {error && <div role="alert" style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
       <button type="submit" disabled={isPending} style={submitStyle(isPending)}>

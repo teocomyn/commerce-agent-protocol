@@ -30,10 +30,22 @@ export interface DashboardAttemptResult {
   retryAfterSeconds: number
 }
 
-const ATTEMPT_LIMIT = 10
 const ATTEMPT_WINDOW_SECONDS = 15 * 60
+const INVITATION_ATTEMPT_LIMIT = 10
 
-async function consumeDashboardAttempt(redisKey: string): Promise<DashboardAttemptResult> {
+// Login attempts per 15-minute window, counted in independent buckets.
+// See app/api/auth/login/route.ts for how the bucket keys are derived.
+const LOGIN_ATTEMPT_LIMITS = {
+  account: 10, // one email on one shop, from any client address
+  ip: 50, // one client address, across every account
+} as const
+
+export type DashboardLoginBucket = keyof typeof LOGIN_ATTEMPT_LIMITS
+
+async function consumeDashboardAttempt(
+  redisKey: string,
+  limit: number,
+): Promise<DashboardAttemptResult> {
   const count = await dashboardRedis.incr(redisKey)
   if (count === 1) await dashboardRedis.expire(redisKey, ATTEMPT_WINDOW_SECONDS)
   let ttl = await dashboardRedis.ttl(redisKey)
@@ -43,17 +55,23 @@ async function consumeDashboardAttempt(redisKey: string): Promise<DashboardAttem
     await dashboardRedis.expire(redisKey, ATTEMPT_WINDOW_SECONDS)
     ttl = ATTEMPT_WINDOW_SECONDS
   }
-  return { allowed: count <= ATTEMPT_LIMIT, retryAfterSeconds: Math.max(1, ttl) }
+  return { allowed: count <= limit, retryAfterSeconds: Math.max(1, ttl) }
 }
 
-export async function consumeDashboardLoginAttempt(key: string): Promise<DashboardAttemptResult> {
-  return consumeDashboardAttempt(`dashboard:login:${key}`)
+export async function consumeDashboardLoginAttempt(
+  bucket: DashboardLoginBucket,
+  key: string,
+): Promise<DashboardAttemptResult> {
+  return consumeDashboardAttempt(`dashboard:login:${bucket}:${key}`, LOGIN_ATTEMPT_LIMITS[bucket])
 }
 
 export async function consumeDashboardInvitationAttempt(key: string): Promise<DashboardAttemptResult> {
-  return consumeDashboardAttempt(`dashboard:invitation:${key}`)
+  return consumeDashboardAttempt(`dashboard:invitation:${key}`, INVITATION_ATTEMPT_LIMIT)
 }
 
-export async function clearDashboardLoginAttempts(key: string): Promise<void> {
-  await dashboardRedis.del(`dashboard:login:${key}`)
+export async function clearDashboardLoginAttempts(
+  bucket: DashboardLoginBucket,
+  key: string,
+): Promise<void> {
+  await dashboardRedis.del(`dashboard:login:${bucket}:${key}`)
 }

@@ -1,11 +1,15 @@
 import crypto from 'node:crypto'
 import { type NextRequest, NextResponse } from 'next/server'
-import { type MerchantRole, Prisma, prisma } from '@cap/db'
+import { z } from 'zod'
+import { Prisma, prisma } from '@cap/db'
+import { clientAddress, parseJsonBody } from '@/lib/api-route'
 import {
+  type DashboardSession,
   createDashboardSessionToken,
   dashboardSessionCookie,
   getDashboardSession,
   isSameOriginMutation,
+  membershipVersion,
 } from '@/lib/dashboard-session'
 import {
   hashHumanPassword,
@@ -16,6 +20,13 @@ import {
 import { consumeDashboardInvitationAttempt } from '@/lib/redis'
 
 const SIGN_IN_REQUIRED = 'Sign in with the invited account, then open this invitation link again.'
+
+// name and password are only used when the invitee creates a new password.
+const acceptInvitationSchema = z.object({
+  token: z.string(),
+  name: z.string().trim().max(255).optional(),
+  password: z.string().optional(),
+})
 
 class InvitationRejected extends Error {
   status: number
@@ -38,21 +49,15 @@ export async function POST(req: NextRequest) {
   if (!isSameOriginMutation(req)) {
     return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })
   }
-  const body = await req.json().catch(() => null) as {
-    token?: unknown
-    name?: unknown
-    password?: unknown
-  } | null
-  const rawToken = typeof body?.token === 'string' ? body.token : ''
-  const name = typeof body?.name === 'string' ? body.name.trim().slice(0, 255) : ''
-  const password = typeof body?.password === 'string' ? body.password : ''
+  const body = await parseJsonBody(req, acceptInvitationSchema, 'Invalid invitation details')
+  if (!body.ok) return body.response
+  const { token: rawToken, name = '', password = '' } = body.value
   if (!isInvitationTokenFormat(rawToken)) {
     return NextResponse.json({ error: 'Invalid invitation details' }, { status: 400 })
   }
 
   const tokenHash = hashInvitationToken(rawToken)
-  const source = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
-  const sourceKey = crypto.createHash('sha256').update(source).digest('hex')
+  const sourceKey = crypto.createHash('sha256').update(clientAddress(req)).digest('hex')
   const blocked = (await Promise.all([
     consumeDashboardInvitationAttempt(`ip:${sourceKey}`),
     consumeDashboardInvitationAttempt(`token:${tokenHash}`),
@@ -97,7 +102,7 @@ export async function POST(req: NextRequest) {
     acceptance = { kind: 'new-password', name, passwordHash: await hashHumanPassword(password) }
   }
 
-  let accepted: { userId: string; merchantId: string; role: MerchantRole }
+  let accepted: Omit<DashboardSession, 'expiresAt'>
   try {
     accepted = await prisma.$transaction(async (tx) => {
       const claimed = await tx.merchantInvitation.updateMany({
@@ -155,7 +160,14 @@ export async function POST(req: NextRequest) {
         },
         update: { role: invitation.role, revokedAt: null },
       })
-      return { userId, merchantId: membership.merchantId, role: membership.role }
+      // The upsert bumps updatedAt, so sessions issued for an earlier
+      // membership of this user at this merchant stop working.
+      return {
+        userId,
+        merchantId: membership.merchantId,
+        role: membership.role,
+        mv: membershipVersion(membership.updatedAt),
+      }
     })
   } catch (error) {
     // Throwing rolls the whole transaction back, so a rejected attempt never

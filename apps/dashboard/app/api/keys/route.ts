@@ -1,22 +1,28 @@
 import crypto from 'node:crypto'
 import { type NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import { prisma } from '@cap/db'
-import { getDashboardMerchant } from '@/lib/merchant-context'
-import { getDashboardSession, isSameOriginMutation } from '@/lib/dashboard-session'
+import { findActiveMerchant } from '@/lib/merchant-context'
+import { isSameOriginMutation } from '@/lib/dashboard-session'
+import { parseJsonBody, requireDashboardSession } from '@/lib/api-route'
+
+// api_keys.label is VARCHAR(255). A blank label is stored as null.
+const createKeySchema = z.object({
+  label: z.string().trim().max(255).nullish(),
+})
 
 // POST /api/keys — create a new API key
 export async function POST(req: NextRequest) {
   if (!isSameOriginMutation(req)) {
     return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })
   }
-  const session = await getDashboardSession(['OWNER', 'ADMIN'])
-  if (!session) {
-    return NextResponse.json({ error: 'Owner or admin role required' }, { status: 403 })
-  }
-  const body = await req.json() as { label?: string }
-  const merchant = await getDashboardMerchant()
+  const auth = await requireDashboardSession(['OWNER', 'ADMIN'], 'Owner or admin role required')
+  if (!auth.ok) return auth.response
+  const body = await parseJsonBody(req, createKeySchema, 'Label must be text of at most 255 characters')
+  if (!body.ok) return body.response
+  const merchant = await findActiveMerchant(auth.value.merchantId)
   if (!merchant) {
-    return NextResponse.json({ error: 'No merchant selected' }, { status: 401 })
+    return NextResponse.json({ error: 'This merchant is no longer active' }, { status: 403 })
   }
 
   // Generate key: cap_live_<40 hex chars>
@@ -29,7 +35,7 @@ export async function POST(req: NextRequest) {
       merchantId: merchant.id,
       keyHash: hash,
       keyPrefix: prefix,
-      label: body.label ?? null,
+      label: body.value.label || null,
     },
   })
 
@@ -44,9 +50,9 @@ export async function POST(req: NextRequest) {
 
 // GET /api/keys
 export async function GET() {
-  const session = await getDashboardSession()
-  if (!session) return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
-  const merchant = await getDashboardMerchant()
+  const auth = await requireDashboardSession()
+  if (!auth.ok) return auth.response
+  const merchant = await findActiveMerchant(auth.value.merchantId)
   if (!merchant) return NextResponse.json([])
 
   const keys = await prisma.apiKey.findMany({

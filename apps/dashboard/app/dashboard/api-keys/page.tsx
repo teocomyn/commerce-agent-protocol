@@ -1,11 +1,13 @@
 import { prisma } from '@cap/db'
-import { getDashboardMerchant } from '@/lib/merchant-context'
+import { getDashboardContext } from '@/lib/merchant-context'
 import ApiKeysClient from './ApiKeysClient'
 
 export default async function ApiKeysPage() {
-  const merchant = await getDashboardMerchant()
+  const context = await getDashboardContext()
+  const role = context?.session.role ?? null
+  const merchant = context?.merchant
   if (!merchant) {
-    return <ApiKeysClient keys={[]} merchantDomain={null} />
+    return <ApiKeysClient keys={[]} merchantDomain={null} role={role} />
   }
 
   const keys = await prisma.apiKey.findMany({
@@ -24,6 +26,7 @@ export default async function ApiKeysPage() {
         createdAt: k.createdAt.toISOString(),
       }))}
       merchantDomain={merchant.shopifyDomain}
+      role={role}
     />
   )
 }

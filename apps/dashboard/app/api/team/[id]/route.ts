@@ -1,8 +1,10 @@
 import { type NextRequest, NextResponse } from 'next/server'
-import { prisma, type MerchantRole } from '@cap/db'
-import { getDashboardSession, isSameOriginMutation } from '@/lib/dashboard-session'
+import { z } from 'zod'
+import { prisma } from '@cap/db'
+import { isSameOriginMutation } from '@/lib/dashboard-session'
+import { isUuid, parseJsonBody, requireDashboardSession } from '@/lib/api-route'
 
-const MANAGED_ROLES: readonly MerchantRole[] = ['ADMIN', 'ANALYST']
+const changeRoleSchema = z.object({ role: z.enum(['ADMIN', 'ANALYST']) })
 
 async function manageableMembership(id: string, merchantId: string, currentUserId: string) {
   return prisma.merchantMember.findFirst({
@@ -24,16 +26,17 @@ export async function PATCH(
   if (!isSameOriginMutation(req)) {
     return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })
   }
-  const session = await getDashboardSession(['OWNER'])
-  if (!session) return NextResponse.json({ error: 'Owner role required' }, { status: 403 })
-  const body = await req.json().catch(() => null) as { role?: unknown } | null
-  const role = typeof body?.role === 'string' ? body.role as MerchantRole : null
-  if (!role || !MANAGED_ROLES.includes(role)) {
-    return NextResponse.json({ error: 'Role must be ADMIN or ANALYST' }, { status: 400 })
-  }
+  const auth = await requireDashboardSession(['OWNER'], 'Owner role required')
+  if (!auth.ok) return auth.response
+  const session = auth.value
   const { id } = await params
+  if (!isUuid(id)) return NextResponse.json({ error: 'Member not found' }, { status: 404 })
+  const body = await parseJsonBody(req, changeRoleSchema, 'Role must be ADMIN or ANALYST')
+  if (!body.ok) return body.response
+  const { role } = body.value
   const membership = await manageableMembership(id, session.merchantId, session.userId)
   if (!membership) return NextResponse.json({ error: 'Member not found' }, { status: 404 })
+  // Writing the membership bumps its updatedAt, which signs the member out.
   await prisma.merchantMember.update({ where: { id }, data: { role } })
   return NextResponse.json({ updated: true, role })
 }
@@ -45,9 +48,11 @@ export async function DELETE(
   if (!isSameOriginMutation(req)) {
     return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })
   }
-  const session = await getDashboardSession(['OWNER'])
-  if (!session) return NextResponse.json({ error: 'Owner role required' }, { status: 403 })
+  const auth = await requireDashboardSession(['OWNER'], 'Owner role required')
+  if (!auth.ok) return auth.response
+  const session = auth.value
   const { id } = await params
+  if (!isUuid(id)) return NextResponse.json({ error: 'Member not found' }, { status: 404 })
   const membership = await manageableMembership(id, session.merchantId, session.userId)
   if (!membership) return NextResponse.json({ error: 'Member not found' }, { status: 404 })
   await prisma.merchantMember.update({ where: { id }, data: { revokedAt: new Date() } })
