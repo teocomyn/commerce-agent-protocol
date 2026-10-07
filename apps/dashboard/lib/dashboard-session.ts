@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { cookies } from 'next/headers'
 import { prisma, type MerchantRole } from '@cap/db'
+import { dashboardSessionSecret } from './session-secret'
 
 export const DASHBOARD_SESSION_COOKIE = 'cap_dashboard_session'
 const SESSION_TTL_SECONDS = 8 * 60 * 60
@@ -12,16 +13,8 @@ export interface DashboardSession {
   expiresAt: number
 }
 
-function sessionSecret(): string {
-  const secret = process.env.DASHBOARD_SESSION_SECRET
-  if (!secret || secret.length < 32) {
-    throw new Error('DASHBOARD_SESSION_SECRET must contain at least 32 characters')
-  }
-  return secret
-}
-
 function signature(payload: string): string {
-  return crypto.createHmac('sha256', sessionSecret()).update(payload).digest('base64url')
+  return crypto.createHmac('sha256', dashboardSessionSecret()).update(payload).digest('base64url')
 }
 
 export function createDashboardSessionToken(

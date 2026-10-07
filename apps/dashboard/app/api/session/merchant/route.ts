@@ -1,33 +1,39 @@
-import crypto from 'node:crypto'
 import { NextResponse, type NextRequest } from 'next/server'
 import { prisma } from '@cap/db'
 import {
   createDashboardSessionToken,
   dashboardSessionCookie,
+  isSameOriginMutation,
 } from '@/lib/dashboard-session'
+import { findPendingOwnerLoginToken, isOwnerLoginTokenFormat } from '@/lib/owner-login'
 
+/**
+ * Landing URL of the cross-site redirect from the API after Shopify OAuth.
+ * It never consumes the token or sets a cookie: a cross-site GET cannot be
+ * distinguished from login CSRF, so the browser is sent to a same-origin
+ * confirmation page that POSTs the token back.
+ */
 export async function GET(req: NextRequest) {
-  const rawToken = req.nextUrl.searchParams.get('token')
-  if (!rawToken) {
-    return NextResponse.json({ error: 'Missing login token' }, { status: 400 })
+  const rawToken = req.nextUrl.searchParams.get('token') ?? ''
+  const url = new URL('/session/confirm', req.url)
+  if (isOwnerLoginTokenFormat(rawToken)) url.searchParams.set('token', rawToken)
+
+  const response = NextResponse.redirect(url, 303)
+  response.headers.set('Cache-Control', 'no-store')
+  response.headers.set('Referrer-Policy', 'no-referrer')
+  return response
+}
+
+export async function POST(req: NextRequest) {
+  if (!isSameOriginMutation(req)) {
+    return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })
   }
+  const body = await req.json().catch(() => null) as { token?: unknown } | null
+  const rawToken = typeof body?.token === 'string' ? body.token : ''
 
-  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex')
   const now = new Date()
-  const loginToken = await prisma.dashboardLoginToken.findUnique({
-    where: { tokenHash },
-    include: {
-      merchant: { select: { uninstalledAt: true } },
-      user: { select: { id: true } },
-    },
-  })
-
-  if (
-    !loginToken ||
-    loginToken.consumedAt ||
-    loginToken.expiresAt <= now ||
-    loginToken.merchant.uninstalledAt
-  ) {
+  const loginToken = await findPendingOwnerLoginToken(rawToken, now)
+  if (!loginToken) {
     return NextResponse.json({ error: 'Invalid or expired login token' }, { status: 401 })
   }
 
@@ -53,18 +59,13 @@ export async function GET(req: NextRequest) {
   }
 
   const sessionToken = createDashboardSessionToken({
-    userId: loginToken.user.id,
+    userId: loginToken.userId,
     merchantId: loginToken.merchantId,
     role: membership.role,
   })
-  const url = new URL('/dashboard', req.url)
-  url.searchParams.set('connected', 'true')
-
-  const response = NextResponse.redirect(url)
+  const response = NextResponse.json({ authenticated: true, redirect: '/dashboard' })
   const cookie = dashboardSessionCookie(sessionToken)
   response.cookies.set(cookie.name, cookie.value, cookie.options)
   response.headers.set('Cache-Control', 'no-store')
-  response.headers.set('Referrer-Policy', 'no-referrer')
-
   return response
 }

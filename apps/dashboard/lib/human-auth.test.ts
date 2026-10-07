@@ -3,6 +3,7 @@ import {
   createInvitationCredential,
   hashHumanPassword,
   hashInvitationToken,
+  isInvitationTokenFormat,
   normalizeEmail,
   validateHumanPassword,
   verifyHumanPassword,
@@ -34,6 +35,9 @@ describe('human dashboard authentication', () => {
     const now = Date.UTC(2026, 7, 25)
     const invitation = createInvitationCredential(now)
     expect(invitation.token).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(isInvitationTokenFormat(invitation.token)).toBe(true)
+    expect(isInvitationTokenFormat(`${invitation.token}=`)).toBe(false)
+    expect(isInvitationTokenFormat('')).toBe(false)
     expect(invitation.tokenHash).toBe(hashInvitationToken(invitation.token))
     expect(invitation.tokenHash).not.toContain(invitation.token)
     expect(invitation.expiresAt.getTime()).toBe(now + 7 * 24 * 60 * 60 * 1_000)

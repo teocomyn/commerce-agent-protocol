@@ -25,15 +25,33 @@ export async function invalidateApiKeyCache(keyHash: string): Promise<void> {
   }
 }
 
-export async function consumeDashboardLoginAttempt(key: string): Promise<{
+export interface DashboardAttemptResult {
   allowed: boolean
   retryAfterSeconds: number
-}> {
-  const redisKey = `dashboard:login:${key}`
+}
+
+const ATTEMPT_LIMIT = 10
+const ATTEMPT_WINDOW_SECONDS = 15 * 60
+
+async function consumeDashboardAttempt(redisKey: string): Promise<DashboardAttemptResult> {
   const count = await dashboardRedis.incr(redisKey)
-  if (count === 1) await dashboardRedis.expire(redisKey, 15 * 60)
-  const ttl = await dashboardRedis.ttl(redisKey)
-  return { allowed: count <= 10, retryAfterSeconds: Math.max(1, ttl) }
+  if (count === 1) await dashboardRedis.expire(redisKey, ATTEMPT_WINDOW_SECONDS)
+  let ttl = await dashboardRedis.ttl(redisKey)
+  if (ttl < 0) {
+    // The key lost (or never received) its expiry, e.g. after a crash between
+    // INCR and EXPIRE. Re-arm it so the counter cannot lock users out forever.
+    await dashboardRedis.expire(redisKey, ATTEMPT_WINDOW_SECONDS)
+    ttl = ATTEMPT_WINDOW_SECONDS
+  }
+  return { allowed: count <= ATTEMPT_LIMIT, retryAfterSeconds: Math.max(1, ttl) }
+}
+
+export async function consumeDashboardLoginAttempt(key: string): Promise<DashboardAttemptResult> {
+  return consumeDashboardAttempt(`dashboard:login:${key}`)
+}
+
+export async function consumeDashboardInvitationAttempt(key: string): Promise<DashboardAttemptResult> {
+  return consumeDashboardAttempt(`dashboard:invitation:${key}`)
 }
 
 export async function clearDashboardLoginAttempts(key: string): Promise<void> {

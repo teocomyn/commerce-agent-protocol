@@ -48,6 +48,10 @@ export function createInvitationCredential(nowMs = Date.now()): {
   }
 }
 
+export function isInvitationTokenFormat(value: string): boolean {
+  return /^[A-Za-z0-9_-]{43}$/.test(value)
+}
+
 export function hashInvitationToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex')
 }
