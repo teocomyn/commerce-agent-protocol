@@ -18,9 +18,29 @@ Branch: `chore/p2-reliability`, stacked on `chore/p0-hardening` (PR #34)
 - Dashboard: per-account + per-IP login limits, session revocation by membership version, scrypt parameters stored in hashes with rehash-on-login, zod validation and correct status codes on all API routes, error messages in the UI, role-based controls, TypeScript strict mode.
 - Docs: OPERATIONS (retention, GDPR, shutdown, deploys), SHOPIFY_E2E, DASHBOARD_AUTH, README, CHANGELOG, `.env.example`.
 
+## Review rounds (2026-10-08)
+
+- PR #34: 57 review threads fixed and resolved (latest: `024d7db`). This includes:
+  - dashboard origins from `DASHBOARD_URL`, which fail closed and are validated at boot in production;
+  - the owner confirmation bound to the merchant it displays;
+  - invitation viewer states;
+  - claim filtering of `care_info` and `summary`;
+  - the guessability check for canonical and previous keys;
+  - compare-and-set in `reencrypt-tokens`;
+  - catalog sync: inactive products only update their status;
+  - resync deduplication per shop.
+- PR #35: P0 merged in (`9f7f11f`):
+  - the Storefront token is decrypted before the checkout row exists;
+  - `ENRICHMENT_VERSION` is bumped to `2026-10-08.2`;
+  - the `shopify_updated_at` guard is now atomic with the raw product write (`bce3e11`).
+  - All 35 threads are resolved.
+
 ## Validation
 
-- API: 109 tests (21 integration + 6 enrichment pipeline against pgvector Postgres + Redis in Docker). Dashboard: 63 tests. Drift check passes with the two new migrations.
+- `chore/p2-reliability` at `bce3e11`, run against pgvector Postgres and Redis in throwaway Docker containers:
+  - API: 124 tests. Dashboard: 71 tests.
+  - Lint, build, `pnpm audit --prod` and the drift check pass.
+- `chore/p0-hardening` at `024d7db`: API 103 tests and dashboard 32 tests; the same checks pass.
 - Compiled API and both workers exit 0 on SIGTERM after draining.
 - Not exercised at runtime: dashboard flows with a real signed-in session (unit-tested pure functions only), real OpenAI/Shopify calls.
 
@@ -39,4 +59,5 @@ Branch: `chore/p2-reliability`, stacked on `chore/p0-hardening` (PR #34)
 
 ## Next concrete action
 
-- Watch CI on the P2 PR, merge #34 then the P2 PR.
+- The user merges PR #34, then PR #35. The agent's auto-mode guard blocks `gh pr merge`.
+- After deploying, run one full catalog resync. It sets `shopify_updated_at` on existing rows and re-applies claim filtering, because the enrichment version changed.
