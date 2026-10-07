@@ -42,7 +42,7 @@ vi.mock('../lib/shopify-token.js', async (importOriginal) => ({
 
 const { runEnrichmentJob } = await import('../lib/enrichment-pipeline.js')
 const { catalogSyncQueue, deadLetterQueue, enrichmentQueue, maintenanceQueue } = await import('../lib/queue.js')
-const { redis } = await import('../lib/redis.js')
+const { redis, searchCacheKey } = await import('../lib/redis.js')
 
 const shopDomain = `cap-pipeline-${crypto.randomBytes(5).toString('hex')}.myshopify.com`
 const shopifyProductId = '7001'
@@ -206,6 +206,7 @@ describe.sequential('enrichment pipeline', () => {
   it('keeps the enriched row of a revision stored while the LLM call ran', async () => {
     await seedEnrichedProduct()
     const seeded = await enrichedRow()
+    const cacheKeyBefore = await searchCacheKey(merchantId, { query: 'x' })
     // An overlapping job stores a newer revision during this job's embedding.
     embeddingsCreateMock.mockImplementationOnce(async () => {
       await prisma.productRaw.updateMany({
@@ -221,6 +222,8 @@ describe.sequential('enrichment pipeline', () => {
     const result = await runEnrichmentJob({ shopDomain, shopifyProductId, merchantId, action: 'update' }, job)
     expect(result).toMatchObject({ skipped: 'stale' })
     expect(Number((await enrichedRow()).productEnriched?.priceMin)).toBe(Number(seeded.productEnriched?.priceMin))
+    // The raw write still happened, so cached searches were invalidated.
+    expect(await searchCacheKey(merchantId, { query: 'x' })).not.toBe(cacheKeyBefore)
   })
 
   it('enriches again when the description changes', async () => {

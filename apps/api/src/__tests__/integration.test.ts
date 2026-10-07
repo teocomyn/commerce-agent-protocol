@@ -17,7 +17,7 @@ import {
   searchCacheKey,
 } from '../lib/redis.js'
 import { runRetention } from '../lib/retention.js'
-import { apiKeyCacheKey } from '@cap/shared'
+import { apiKeyCacheKey, apiKeyRateLimitKey } from '@cap/shared'
 import { fullSyncRanUnder, queueOutdatedEnrichmentResyncs } from '../lib/enrichment-backfill.js'
 import { ENRICHMENT_VERSION } from '../lib/enrichment-output.js'
 import {
@@ -791,10 +791,12 @@ describe.sequential('CAP integration boundaries', () => {
     const keyB = await createKey(merchantB, 'gdpr-cached-key')
     const keyBHash = crypto.createHash('sha256').update(keyB).digest('hex')
     await redis.set(apiKeyCacheKey(keyBHash), JSON.stringify({ merchantId: merchantB }))
+    await redis.set(apiKeyRateLimitKey(keyBHash), '3', 'EX', 60)
     const cachedSearch = await searchCacheKey(merchantB, { query: 'gdpr' })
     await redis.set(cachedSearch!, JSON.stringify({ results: [] }), 'EX', 120)
     expect((await signedWebhook('shop/redact', domains[1]!, `shop-redact-b-${suffix}`)).status).toBe(200)
     expect(JSON.parse(await redis.get(apiKeyCacheKey(keyBHash)) ?? 'null')).toBe('invalidated')
+    expect(await redis.exists(apiKeyRateLimitKey(keyBHash))).toBe(0)
     // Erased, not just hidden: no cached search of the shop is left.
     expect(await redis.exists(cachedSearch!, `search:gen:${merchantB}`)).toBe(0)
     expect(await prisma.merchant.findUnique({ where: { id: merchantB } })).toBeNull()

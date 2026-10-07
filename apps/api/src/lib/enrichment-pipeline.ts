@@ -451,6 +451,9 @@ export async function runEnrichmentJob(
     `
   }
   if (enrichedRows === 0) {
+    // The raw row (status included) was written above: cached searches must
+    // not keep serving the previous state if the newer job fails.
+    await invalidateMerchantSearchCache(merchantId)
     console.log(`[Worker] Product ${shopifyProductId}: a newer revision was stored during enrichment, skipping`)
     return { productId: rawProduct.id, skipped: 'stale' }
   }
