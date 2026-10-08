@@ -27,7 +27,7 @@ To rotate the encryption key (or to move an older string-format key to the requi
 
 The dashboard image needs `NEXT_PUBLIC_API_URL` at build time: Render passes service environment variables as Docker build args, and `Dockerfile.dashboard` fails the build unless it is the public https URL of the API.
 
-Both images are built in two stages. The runtime stage holds only production dependencies and compiled output, and runs as the unprivileged `node` user, including Render's `pnpm db:migrate` pre-deploy command. The base image is pinned by exact version and digest; Dependabot proposes updates weekly. CI builds both images on every pull request and checks that they do not run as root.
+Both images use multi-stage builds (a shared base, a build stage and a runtime stage). The runtime stage holds the app's production dependencies and compiled output, plus pnpm and OpenSSL (needed by Prisma and by the `pnpm db:migrate` pre-deploy command), and runs everything as the unprivileged `node` user. The base image is pinned by exact version and digest; Dependabot proposes updates weekly. CI builds both images on every pull request and checks that they do not run as root.
 
 The API pre-deploy hook runs `prisma migrate deploy`; the initial migration enables `vector`. Render Postgres 16 supports pgvector. Deploys are gated on successful GitHub checks.
 

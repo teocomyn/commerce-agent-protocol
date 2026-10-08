@@ -64,9 +64,12 @@ export function GlobeCdn({
   const phiOffsetRef = useRef(0)
   const thetaOffsetRef = useRef(0)
   const isPausedRef = useRef(false)
-  // Reduced motion: no automatic rotation; dragging still works.
+  // Reduced motion: no automatic rotation; dragging still works. Read through
+  // a ref so the preference (resolved after mount) freezes the running globe
+  // instead of destroying and recreating it.
   const reducedMotion = usePrefersReducedMotion()
-  const rotationSpeed = reducedMotion ? 0 : speed
+  const rotationSpeedRef = useRef(speed)
+  rotationSpeedRef.current = reducedMotion ? 0 : speed
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     pointerInteracting.current = { x: e.clientX, y: e.clientY }
@@ -138,7 +141,7 @@ export function GlobeCdn({
         arcHeight: 0.32,
         opacity: 0.85,
         onRender: (state: Record<string, number>) => {
-          if (!isPausedRef.current) phi += rotationSpeed
+          if (!isPausedRef.current) phi += rotationSpeedRef.current
           state['phi'] = phi + phiOffsetRef.current + dragOffset.current.phi
           state['theta'] = 0.25 + thetaOffsetRef.current + dragOffset.current.theta
           state['width'] = width * 2
@@ -169,7 +172,7 @@ export function GlobeCdn({
       if (animationId) cancelAnimationFrame(animationId)
       if (globe) globe.destroy()
     }
-  }, [markers, arcs, rotationSpeed])
+  }, [markers, arcs])
 
   return (
     <div className={cn('relative aspect-square select-none', className)}>

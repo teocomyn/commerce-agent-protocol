@@ -31,6 +31,10 @@ const key = await import('@/app/api/keys/[id]/route')
 const team = await import('@/app/api/team/route')
 const member = await import('@/app/api/team/[id]/route')
 const invitation = await import('@/app/api/team/invitations/[id]/route')
+const login = await import('@/app/api/auth/login/route')
+const acceptInvitation = await import('@/app/api/invitations/accept/route')
+const logout = await import('@/app/api/session/logout/route')
+const ownerSession = await import('@/app/api/session/merchant/route')
 
 const MERCHANT_A = '0b1f8c3e-2d4a-4e6b-9c1d-111111111111'
 const OTHER_ID = '7c2e9d4f-3e5b-4f7c-8d2e-222222222222'
@@ -68,11 +72,12 @@ describe('dashboard route authorization', () => {
       keys.POST(request('POST', {})),
       key.DELETE(request('DELETE'), params(OTHER_ID)),
       team.GET(),
+      team.POST(request('POST', { email: 'new@example.test', role: 'ADMIN' })),
       member.PATCH(request('PATCH', { role: 'ADMIN' }), params(OTHER_ID)),
       member.DELETE(request('DELETE'), params(OTHER_ID)),
       invitation.DELETE(request('DELETE'), params(OTHER_ID)),
     ])
-    expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401])
+    expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401])
     expect(prismaCalls()).toBe(0)
   })
 
@@ -82,10 +87,17 @@ describe('dashboard route authorization', () => {
     const responses = await Promise.all([
       keys.POST(request('POST', {})),
       key.DELETE(request('DELETE'), params(OTHER_ID)),
+      team.POST(request('POST', { email: 'new@example.test', role: 'ADMIN' })),
       member.PATCH(request('PATCH', { role: 'ADMIN' }), params(OTHER_ID)),
+      member.DELETE(request('DELETE'), params(OTHER_ID)),
       invitation.DELETE(request('DELETE'), params(OTHER_ID)),
+      // Session-establishing routes check the origin too (login CSRF).
+      login.POST(request('POST', { email: 'owner@example.test', password: 'a secure password', shop: 'a.myshopify.com' })),
+      acceptInvitation.POST(request('POST', { token: 'x' })),
+      logout.POST(request('POST')),
+      ownerSession.POST(request('POST', { merchantId: MERCHANT_A })),
     ])
-    expect(responses.map((response) => response.status)).toEqual([403, 403, 403, 403])
+    expect(responses.map((response) => response.status)).toEqual([403, 403, 403, 403, 403, 403, 403, 403, 403, 403])
     expect(prismaCalls()).toBe(0)
   })
 
@@ -96,7 +108,10 @@ describe('dashboard route authorization', () => {
     expect((await key.DELETE(request('DELETE'), params(OTHER_ID))).status).toBe(403)
     expect((await keys.GET()).status).toBe(200)
 
+    expect((await team.POST(request('POST', { email: 'new@example.test', role: 'ANALYST' }))).status).toBe(403)
+
     signIn('ADMIN')
+    expect((await team.POST(request('POST', { email: 'new@example.test', role: 'ANALYST' }))).status).toBe(403)
     expect((await member.PATCH(request('PATCH', { role: 'ANALYST' }), params(OTHER_ID))).status).toBe(403)
     expect((await member.DELETE(request('DELETE'), params(OTHER_ID))).status).toBe(403)
     expect((await invitation.DELETE(request('DELETE'), params(OTHER_ID))).status).toBe(403)

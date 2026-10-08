@@ -146,5 +146,9 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
 
+      # The assignment fails the step if the container does not run at all.
       - name: Runs as an unprivileged user
-        run: test "$(docker run --rm ${{ matrix.image }}:ci id -u)" != "0"
+        run: |
+          uid="$(docker run --rm ${{ matrix.image }}:ci id -u)"
+          echo "runtime uid: $uid"
+          test -n "$uid" && test "$uid" != "0"
