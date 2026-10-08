@@ -21,8 +21,8 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-// Local stdio MCP clients and the HTTP interfaces exposed by the API.
-const agentInterfaces = ['Claude Desktop', 'Cursor', 'MCP stdio', 'REST', 'OpenAPI']
+// MCP clients and the HTTP interfaces exposed by the API.
+const agentInterfaces = ['Claude Desktop', 'Cursor', 'MCP stdio', 'MCP HTTP', 'REST', 'OpenAPI']
 // Shopify is the only supported platform in v0.1.
 const shopifyIntegration = ['Shopify', 'OAuth', 'Admin GraphQL', 'Cart API', 'Webhooks']
 
@@ -41,13 +41,13 @@ export function Marquee() {
           Shipping for <span className="text-gradient-pulse">Shopify</span>.
         </h2>
         <p className="text-muted text-base sm:text-lg mt-4 max-w-xl mx-auto leading-relaxed">
-          A REST API and a local MCP server in front of your Shopify catalog.
-          Other platforms and remote MCP transports are open to contributions.
+          A REST API and an MCP server, local or remote, in front of your Shopify catalog.
+          Other platforms are open to contributions.
         </p>
 
         <div className="mt-12">
           <GroupLabel>AGENT INTERFACES</GroupLabel>
-          <div className="grid grid-cols-3 sm:grid-cols-5 gap-x-2 gap-y-3">
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-x-2 gap-y-3">
             {agentInterfaces.map((a) => (
               <Wordmark key={a}>{a}</Wordmark>
             ))}

@@ -3,7 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { prisma } from '@cap/db'
 import { registerGracefulShutdown } from '../lib/shutdown.js'
-import { COMMERCE_TOOLS, callCommerceTool, toToolResult } from './tools.js'
+import { COMMERCE_TOOLS, type McpToolContext, callCommerceTool, toToolResult } from './tools.js'
 
 // In MCP (stdio) mode, calls are not authenticated by an API key. The server
 // is bound to a single merchant via the CAP_MERCHANT_ID environment variable
@@ -22,7 +22,12 @@ function getMcpMerchantId(): string {
 // MCP SERVER
 // ============================================================
 
-export async function startMcpServer() {
+/**
+ * An MCP server exposing the commerce tools. `resolveContext` says which
+ * merchant the call is for: the CAP_MERCHANT_ID binding over stdio, the API
+ * key over HTTP. The server itself is the same for both transports.
+ */
+export function createCommerceMcpServer(resolveContext: (server: Server) => McpToolContext): Server {
   const server = new Server(
     { name: 'commerce-agent-protocol', version: '0.1.0' },
     { capabilities: { tools: {} } },
@@ -32,10 +37,7 @@ export async function startMcpServer() {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
-      return toToolResult(await callCommerceTool(request.params.name, request.params.arguments, {
-        merchantId: getMcpMerchantId(),
-        clientName: server.getClientVersion()?.name,
-      }))
+      return toToolResult(await callCommerceTool(request.params.name, request.params.arguments, resolveContext(server)))
     } catch (error) {
       // Infrastructure failures (database, OpenAI): same envelope as REST,
       // without internal details.
@@ -47,6 +49,14 @@ export async function startMcpServer() {
     }
   })
 
+  return server
+}
+
+export async function startMcpServer() {
+  const server = createCommerceMcpServer((mcp) => ({
+    merchantId: getMcpMerchantId(),
+    clientName: mcp.getClientVersion()?.name,
+  }))
   const transport = new StdioServerTransport()
   await server.connect(transport)
   console.error('[MCP] Commerce Agent Protocol server running (stdio)')

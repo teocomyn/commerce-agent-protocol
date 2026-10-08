@@ -36,12 +36,19 @@ const RATE_LIMITS: Record<string, number> = {
   pro: 10000,
 }
 
+// REST agents send the key in X-CAP-Key; MCP clients send it as a bearer
+// token (the header remote MCP connectors let users configure).
+function presentedApiKey(xCapKey: string | undefined, authorization: string | undefined): string | undefined {
+  if (xCapKey) return xCapKey
+  return authorization?.match(/^Bearer\s+(\S+)$/i)?.[1]
+}
+
 export const authMiddleware = createMiddleware(async (c, next) => {
-  const apiKey = c.req.header('X-CAP-Key')
+  const apiKey = presentedApiKey(c.req.header('X-CAP-Key'), c.req.header('Authorization'))
 
   if (!apiKey) {
     return c.json<CAPError>({
-      error: { code: 'MISSING_API_KEY', message: 'X-CAP-Key header is required' },
+      error: { code: 'MISSING_API_KEY', message: 'An API key is required (X-CAP-Key header or Authorization: Bearer)' },
     }, 401)
   }
 

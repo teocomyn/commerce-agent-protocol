@@ -101,7 +101,7 @@ export function Hero() {
           {[
             { v: '3', l: 'REST endpoints' },
             { v: '1536d', l: 'embeddings' },
-            { v: '3', l: 'MCP tools (stdio)' },
+            { v: '3', l: 'MCP tools' },
             { v: 'Apache 2.0', l: 'license' },
           ].map((s) => (
             <div key={s.l} className="bg-void/80 backdrop-blur p-4 sm:p-5 text-center">

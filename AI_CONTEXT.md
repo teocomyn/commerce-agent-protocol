@@ -15,7 +15,7 @@ Prototype / unrelated standalone product. No paying user, no adopter, no product
 - pnpm 9 + Turbo monorepo, Node 22, TypeScript.
 - `apps/api`: Hono API. `POST /v1/search` (pgvector cosine + lexical fallback), `POST /v1/compare`, `POST /v1/checkout/initiate` (Shopify Storefront `cartCreate`), Shopify OAuth (`/shopify/*`), webhooks (`/webhooks/shopify`), operations (`/internal/operations/*`, dedicated token), `/openapi.json`.
 - `apps/api/src/workers`: BullMQ catalog sync (Admin GraphQL `2026-07`, active products only) and enrichment (GPT-4o-mini strict structured output + `text-embedding-3-small`, GEO score).
-- `apps/api/src/mcp`: stdio MCP server (3 tools), bound to one merchant through `CAP_MERCHANT_ID`; reads the database directly.
+- `apps/api/src/mcp`: MCP server (3 tools) built on the shared services in `apps/api/src/services`. Over stdio it is bound to one merchant through `CAP_MERCHANT_ID` and reads the database directly; over Streamable HTTP (`/mcp` on the API) the API key decides the merchant.
 - `apps/dashboard`: Next.js 15, own HMAC session cookies, scrypt passwords, roles OWNER/ADMIN/ANALYST, invitations, API keys.
 - `apps/site`: Next.js marketing site.
 - `packages/db`: Prisma 5.22 schema + SQL migrations (Postgres 16 + pgvector). `packages/shared`: zod schemas, GEO score.
@@ -52,7 +52,7 @@ Prototype / unrelated standalone product. No paying user, no adopter, no product
 ## Known risks and constraints
 
 - Strategic: Google + Shopify UCP (Jan 2026) and OpenAI + Stripe ACP (Sep 2025) cover the same ground, and Shopify reportedly enables UCP and native MCP servers for its merchants. CAP only supports Shopify. Positioning decision pending (recommended: GEO/catalog-quality layer that feeds UCP/ACP).
-- MCP is stdio-only with direct database access and the master encryption key; not usable as a remote connector.
+- Remote MCP (`/mcp`) authenticates with an API key (Bearer or `X-CAP-Key`); OAuth, which web connectors such as Claude.ai require, is not implemented. The stdio server still needs direct database access and the master encryption key.
 - No email verification (invitation email squatting), no observability vendor (Sentry or similar), no remote MCP transport.
 
 ## Current delivery milestone

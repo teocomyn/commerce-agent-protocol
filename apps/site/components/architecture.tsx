@@ -75,7 +75,7 @@ export function Architecture() {
             <div className="h-8 w-px bg-gradient-to-b from-edge via-accent/60 to-edge" />
             <FlowNode label="CAP" sub="protocol + infra" variant="primary" />
             <div className="h-8 w-px bg-gradient-to-b from-edge via-accent/60 to-edge" />
-            <FlowNode label="AGENTS" sub="mcp stdio · rest" variant="pulse" />
+            <FlowNode label="AGENTS" sub="mcp · rest" variant="pulse" />
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-12 pt-8 border-t border-edge">
