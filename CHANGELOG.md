@@ -14,8 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `Idempotency-Key` header on `POST /v1/checkout/initiate`: retries replay the first outcome, success or error (`Idempotent-Replayed: true`), instead of creating another cart; keys are never released.
 - Shopify GDPR compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) and a daily retention job (agent queries 180 days, webhook receipts 30 days, expired tokens and invitations).
 - Graceful shutdown on `SIGTERM` for the API and both workers; containers run `node` as PID 1.
+- `commerce_checkout` accepts `idempotency_key`, with the same semantics as the `Idempotency-Key` header.
+- Compare responses list the compared products (`comparison.products`, id and title).
 
 ### Changed
+- The MCP tools and the REST endpoints run the same services: the tools take the REST request bodies as arguments (published as JSON Schema from the same zod schemas) and return the REST response bodies, with the same validation, visibility rules, error codes, search cache and agent-query logging. **Breaking for MCP clients:** search filters move under `filters` (`{"query": "…", "filters": {"price_max": 120}}`), and results use the REST search format.
 - Catalog synchronization uses Shopify Admin GraphQL `2026-07` and asynchronously backfills inventory locations.
 - Checkout and search availability now honor untracked inventory and Shopify's `CONTINUE` selling policy.
 - Shopify shipping destinations are synchronized and enforced before cart creation.

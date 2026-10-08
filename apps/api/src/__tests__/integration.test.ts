@@ -17,6 +17,7 @@ import {
   searchCacheKey,
 } from '../lib/redis.js'
 import { runRetention } from '../lib/retention.js'
+import { COMMERCE_TOOLS, callCommerceTool, toToolResult } from '../mcp/tools.js'
 import { apiKeyCacheKey, apiKeyRateLimitKey } from '@cap/shared'
 import { fullSyncRanUnder, queueOutdatedEnrichmentResyncs } from '../lib/enrichment-backfill.js'
 import { ENRICHMENT_VERSION } from '../lib/enrichment-output.js'
@@ -545,6 +546,45 @@ describe.sequential('CAP integration boundaries', () => {
       'storefront',
       expect.objectContaining({ trackingToken: checkout.trackingToken, shippingCountry: 'FR' }),
     )
+  })
+
+  it('serves the MCP tools through the same services as REST', async () => {
+    const context = { merchantId: merchantA, clientName: 'claude-ai' }
+    const searchTool = COMMERCE_TOOLS.find((tool) => tool.name === 'commerce_search')!
+    expect(searchTool.inputSchema).toMatchObject({ type: 'object', required: ['query'] })
+    expect(JSON.stringify(COMMERCE_TOOLS)).not.toContain('$ref')
+    expect(JSON.stringify(COMMERCE_TOOLS.find((tool) => tool.name === 'commerce_checkout')))
+      .toContain('idempotency_key')
+
+    // Search: scoped to the bound merchant, logged like a REST search.
+    const search = await callCommerceTool('commerce_search', { query: 'shoe', filters: { shipping_country: 'fr' } }, context)
+    expect(search.status).toBe(200)
+    const found = search.body as { results: Array<{ id: string }>; agent_query_id?: string }
+    expect(found.results.map((result) => result.id)).toContain(productA)
+    expect(found.results.map((result) => result.id)).not.toContain(productB)
+    const logged = await prisma.agentQuery.findUniqueOrThrow({ where: { id: found.agent_query_id! } })
+    expect(logged).toMatchObject({ merchantId: merchantA, agentType: 'claude', agentId: 'mcp:claude-ai' })
+
+    // Same validation and error codes as the REST bodies.
+    expect((await callCommerceTool('commerce_search', { query: '' }, context)).body)
+      .toMatchObject({ error: { code: 'VALIDATION_ERROR' } })
+    expect((await callCommerceTool('commerce_search', { query: 'shoe', limit: 1000 }, context)).status).toBe(400)
+    const compare = await callCommerceTool('commerce_compare', { product_ids: [productA, productB] }, context)
+    expect(compare).toMatchObject({ status: 404, body: { error: { code: 'NOT_FOUND' } } })
+    expect(toToolResult(compare).isError).toBe(true)
+    expect((await callCommerceTool('commerce_refund', {}, context)).body).toMatchObject({ error: { code: 'UNKNOWN_TOOL' } })
+
+    // Checkout: idempotent like the REST endpoint.
+    createShopifyCartMock.mockClear()
+    const args = { product_id: productA, shipping_country: 'FR', idempotency_key: `mcp-${suffix}` }
+    const first = await callCommerceTool('commerce_checkout', args, context)
+    expect(first.status).toBe(200)
+    const replay = await callCommerceTool('commerce_checkout', args, context)
+    expect(replay).toMatchObject({ status: 200, headers: { 'Idempotent-Replayed': 'true' } })
+    expect(replay.body).toEqual(first.body)
+    expect(createShopifyCartMock).toHaveBeenCalledTimes(1)
+    expect((await callCommerceTool('commerce_checkout', { ...args, quantity: 2 }, context)).body)
+      .toMatchObject({ error: { code: 'IDEMPOTENCY_KEY_REUSED' } })
   })
 
   it('rejects checkout for a country outside Shopify shipping destinations', async () => {

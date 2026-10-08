@@ -309,9 +309,18 @@ components:
       properties:
         comparison:
           type: object
-          required: [matrix]
+          required: [matrix, products]
           properties:
             winner_by_price: { type: string }
+            products:
+              type: array
+              description: The compared products, so the matrix columns can be labelled.
+              items:
+                type: object
+                required: [id, title]
+                properties:
+                  id: { type: string, format: uuid }
+                  title: { type: string }
             winner_by_certifications:
               type: string
               description: Product with the most merchant-declared certifications. Not an environmental rating.

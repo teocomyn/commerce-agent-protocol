@@ -35,7 +35,7 @@ Today, when an AI agent wants to buy something for a human, it scrapes HTML, gue
 |--------|--------------|
 | **1. Agent-readable catalog format** | A versioned JSON schema for products, variants, stock, prices, certifications, shipping, returns — designed to be read by an LLM, not a human. |
 | **2. Transaction API** | `/v1/search` (semantic, vector), `/v1/compare` (matrix), `/v1/checkout/initiate` (Shopify Cart API). Authenticated by API keys, rate-limited per plan. |
-| **3. MCP server** | Stdio MCP server with `commerce_search`, `commerce_compare`, `commerce_checkout` tools, for local stdio MCP clients such as Claude Desktop and Cursor. No remote MCP transport yet. |
+| **3. MCP server** | Stdio MCP server with `commerce_search`, `commerce_compare`, `commerce_checkout` tools, for local stdio MCP clients such as Claude Desktop and Cursor. The tools run the same code as the REST endpoints (same arguments, results and errors). No remote MCP transport yet. |
 
 This repository contains both the **spec** (open, versioned in [`cap-spec/`](./cap-spec)) and the **reference implementation** (this monorepo).
 
