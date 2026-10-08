@@ -23,7 +23,7 @@ A CAP Server **MAY** front a single merchant or many; when it fronts many, it **
 CAP is transport-agnostic. v0.1 defines two normative bindings:
 
 1. **HTTP/JSON** over TLS, with `Content-Type: application/json`.
-2. **MCP stdio** ([Model Context Protocol](https://modelcontextprotocol.io)) for local tool invocation.
+2. **MCP** ([Model Context Protocol](https://modelcontextprotocol.io)) tools, over stdio for local clients or over Streamable HTTP for remote ones.
 
 Servers **MAY** expose either or both. The semantics of operations are identical across bindings.
 
@@ -44,7 +44,10 @@ X-CAP-Key: cap_live_<40-hex>
 
 ### 3.2 MCP
 
-MCP clients are bound to a merchant context out-of-band (e.g. via the merchant configuring the CAP server in their MCP client). The server **MUST** reject calls when the merchant context is missing.
+- **Streamable HTTP:** clients authenticate with the same API key as the HTTP binding, sent as `Authorization: Bearer cap_live_…` (or `X-CAP-Key`), and the key determines the merchant. The reference server exposes this binding at `/mcp`.
+- **stdio:** clients are bound to a merchant context out-of-band, for example when the merchant configures the CAP server in their MCP client.
+
+The server **MUST** reject calls when the merchant context is missing.
 
 ## 4. Operations
 

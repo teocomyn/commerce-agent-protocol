@@ -6,6 +6,7 @@ import { secureHeaders } from 'hono/secure-headers'
 import { HTTPException } from 'hono/http-exception'
 import { searchRouter } from './routes/search.js'
 import { compareRouter } from './routes/compare.js'
+import { mcpRouter } from './routes/mcp.js'
 import { checkoutRouter } from './routes/checkout.js'
 import { webhookRouter } from './routes/webhooks.js'
 import { oauthRouter } from './routes/shopify/oauth.js'
@@ -33,6 +34,14 @@ app.use('/v1/*', cors({
   allowMethods: ['GET', 'POST', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'X-CAP-Key', 'Authorization', 'Idempotency-Key', 'X-Agent-ID'],
   exposeHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Idempotent-Replayed'],
+}))
+
+// Remote MCP: same browser origins, plus the MCP protocol headers.
+app.use('/mcp', cors({
+  origin: ['https://claude.ai', 'https://chatgpt.com', 'https://perplexity.ai'],
+  allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Accept', 'Authorization', 'X-CAP-Key', 'Mcp-Session-Id', 'Mcp-Protocol-Version'],
+  exposeHeaders: ['Mcp-Session-Id', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
 }))
 
 // ============================================================
@@ -273,6 +282,22 @@ app.get('/openapi.json', async (c) => {
           },
         },
       },
+      '/mcp': {
+        post: {
+          summary: 'Remote MCP endpoint',
+          description:
+            'Model Context Protocol over Streamable HTTP (stateless, JSON responses). Exposes commerce_search, commerce_compare and commerce_checkout, which take the request bodies of the matching /v1 endpoints and return their response bodies. Authenticate with the API key as Authorization: Bearer cap_live_... or X-CAP-Key; the key decides the merchant.',
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: { type: 'object', description: 'JSON-RPC 2.0 message' } } },
+          },
+          responses: {
+            '200': { description: 'JSON-RPC response' },
+            '401': { description: 'Missing, malformed or revoked API key' },
+            '429': { description: 'Rate limit exceeded' },
+          },
+        },
+      },
       '/v1/compare': {
         post: {
           summary: 'Compare products',
@@ -423,6 +448,10 @@ app.use('/v1/*', authMiddleware)
 app.route('/v1/search', searchRouter)
 app.route('/v1/compare', compareRouter)
 app.route('/v1/checkout', checkoutRouter)
+
+// Remote MCP: the commerce tools over Streamable HTTP, same API key.
+app.use('/mcp', authMiddleware)
+app.route('/mcp', mcpRouter)
 
 // ============================================================
 // ERROR HANDLING

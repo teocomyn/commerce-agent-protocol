@@ -7,7 +7,7 @@ const faqs = [
   },
   {
     q: 'How is CAP different from MCP?',
-    a: 'MCP is a generic LLM-tool protocol. CAP is specialized for commerce: catalog ingestion, semantic search, comparison and checkout creation. CAP ships a stdio MCP server with three tools as one transport, alongside its REST API. It builds on MCP rather than replacing it.',
+    a: 'MCP is a generic LLM-tool protocol. CAP is specialized for commerce: catalog ingestion, semantic search, comparison and checkout creation. CAP ships an MCP server with three tools, over stdio for local clients and over HTTP for remote ones, alongside its REST API. It builds on MCP rather than replacing it.',
   },
   {
     q: 'Why not just use schema.org?',

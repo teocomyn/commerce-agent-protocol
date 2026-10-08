@@ -285,7 +285,7 @@ export function FeaturesBento() {
             <p className="mx-auto max-w-md text-balance text-center text-2xl sm:text-[26px] font-semibold leading-[1.25] text-fg">
               Native <span className="text-gradient-brand">MCP</span> server. Three tools.
               <br />
-              Runs over stdio in Claude Desktop, Cursor and other local MCP clients.
+              Local over stdio, or remote over HTTP with an API key.
             </p>
 
             <div className="flex justify-center gap-6 sm:gap-10 mt-10 overflow-hidden">

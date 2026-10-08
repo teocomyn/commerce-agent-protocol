@@ -35,7 +35,7 @@ Today, when an AI agent wants to buy something for a human, it scrapes HTML, gue
 |--------|--------------|
 | **1. Agent-readable catalog format** | A versioned JSON schema for products, variants, stock, prices, certifications, shipping, returns — designed to be read by an LLM, not a human. |
 | **2. Transaction API** | `/v1/search` (semantic, vector), `/v1/compare` (matrix), `/v1/checkout/initiate` (Shopify Cart API). Authenticated by API keys, rate-limited per plan. |
-| **3. MCP server** | Stdio MCP server with `commerce_search`, `commerce_compare`, `commerce_checkout` tools, for local stdio MCP clients such as Claude Desktop and Cursor. The tools run the same code as the REST endpoints (same arguments, results and errors). No remote MCP transport yet. |
+| **3. MCP server** | Stdio MCP server with `commerce_search`, `commerce_compare`, `commerce_checkout` tools, for local stdio MCP clients such as Claude Desktop and Cursor. The tools run the same code as the REST endpoints (same arguments, results and errors). Served over stdio for local clients and over Streamable HTTP at `/mcp` for remote ones (API key auth). |
 
 This repository contains both the **spec** (open, versioned in [`cap-spec/`](./cap-spec)) and the **reference implementation** (this monorepo).
 
@@ -51,7 +51,7 @@ Shopify ──► OAuth ──► Catalog sync (BullMQ)
                           │                  /v1/compare
                           │                  /v1/checkout/initiate (Cart API)
                           │
-                          └─► MCP stdio (commerce_search / compare / checkout)
+                          └─► MCP stdio and HTTP /mcp (commerce_search / compare / checkout)
                                          │
                                          ▼
                               Claude · ChatGPT · Perplexity · Operator
@@ -109,7 +109,16 @@ curl -X POST http://localhost:3000/v1/search \
 
 Send an `Idempotency-Key` header on `POST /v1/checkout/initiate`: a retried request with the same key and body returns the first outcome (checkout or error) instead of creating a second Shopify cart. Keys are never released; to try again after a failure, use a new key.
 
-**Run as MCP server** (stdio, for Claude Desktop / Cursor):
+**Connect a remote MCP client** (Streamable HTTP, any client that can send a custom header). The API key decides the merchant, as on the REST endpoints:
+
+```bash
+claude mcp add --transport http cap https://api.cap-protocol.org/mcp \
+  --header "Authorization: Bearer cap_live_..."
+```
+
+In Cursor's `mcp.json`: `{"mcpServers": {"cap": {"url": "https://api.cap-protocol.org/mcp", "headers": {"Authorization": "Bearer cap_live_..."}}}}`. Web connectors that require OAuth (for example Claude.ai custom connectors) are not supported yet.
+
+**Run as a local MCP server** (stdio, for Claude Desktop / Cursor):
 
 ```bash
 CAP_MERCHANT_ID=<merchant-uuid> pnpm --silent -C apps/api mcp

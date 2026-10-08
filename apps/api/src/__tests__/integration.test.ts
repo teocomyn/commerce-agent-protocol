@@ -18,6 +18,7 @@ import {
 } from '../lib/redis.js'
 import { runRetention } from '../lib/retention.js'
 import { COMMERCE_TOOLS, callCommerceTool, toToolResult } from '../mcp/tools.js'
+import { mcpRouter } from '../routes/mcp.js'
 import { apiKeyCacheKey, apiKeyRateLimitKey } from '@cap/shared'
 import { fullSyncRanUnder, queueOutdatedEnrichmentResyncs } from '../lib/enrichment-backfill.js'
 import { ENRICHMENT_VERSION } from '../lib/enrichment-output.js'
@@ -585,6 +586,42 @@ describe.sequential('CAP integration boundaries', () => {
     expect(createShopifyCartMock).toHaveBeenCalledTimes(1)
     expect((await callCommerceTool('commerce_checkout', { ...args, quantity: 2 }, context)).body)
       .toMatchObject({ error: { code: 'IDEMPOTENCY_KEY_REUSED' } })
+  })
+
+  it('serves the commerce tools over remote MCP with the API key', async () => {
+    const app = new Hono()
+    app.use('/mcp', authMiddleware)
+    app.route('/mcp', mcpRouter)
+    let nextId = 1
+    const rpc = (method: string, params: unknown, headers: Record<string, string> = { Authorization: `Bearer ${validKey}` }) =>
+      app.request('/mcp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...headers },
+        body: JSON.stringify({ jsonrpc: '2.0', id: nextId++, method, params }),
+      })
+
+    // The API key decides the merchant; without one nothing is served.
+    expect((await rpc('tools/list', {}, {})).status).toBe(401)
+
+    const init = await rpc('initialize', {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'integration-client', version: '1' },
+    })
+    expect(init.status).toBe(200)
+    expect(await init.json()).toMatchObject({ result: { serverInfo: { name: 'commerce-agent-protocol' } } })
+
+    const list = await (await rpc('tools/list', {})).json() as { result: { tools: Array<{ name: string }> } }
+    expect(list.result.tools.map((tool) => tool.name).sort())
+      .toEqual(['commerce_checkout', 'commerce_compare', 'commerce_search'])
+
+    // The X-CAP-Key header works too; results are scoped to the key's merchant.
+    const call = await rpc('tools/call', { name: 'commerce_search', arguments: { query: 'shoe' } }, { 'X-CAP-Key': validKey })
+    const { result } = await call.json() as { result: { content: Array<{ text: string }>; isError?: boolean } }
+    expect(result.isError).toBeUndefined()
+    const ids = (JSON.parse(result.content[0]!.text) as { results: Array<{ id: string }> }).results.map((r) => r.id)
+    expect(ids).toContain(productA)
+    expect(ids).not.toContain(productB)
   })
 
   it('rejects checkout for a country outside Shopify shipping destinations', async () => {

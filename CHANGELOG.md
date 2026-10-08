@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Shopify GDPR compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) and a daily retention job (agent queries 180 days, webhook receipts 30 days, expired tokens and invitations).
 - Graceful shutdown on `SIGTERM` for the API and both workers; containers run `node` as PID 1.
 - `commerce_checkout` accepts `idempotency_key`, with the same semantics as the `Idempotency-Key` header.
+- Remote MCP: the commerce tools over Streamable HTTP at `/mcp`, authenticated with an API key (`Authorization: Bearer` or `X-CAP-Key`), stateless and rate-limited like the REST endpoints.
 - Compare responses list the compared products (`comparison.products`, id and title).
 
 ### Changed

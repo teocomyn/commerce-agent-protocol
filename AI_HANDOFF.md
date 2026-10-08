@@ -2,13 +2,14 @@
 
 Updated: 2026-10-08
 Agent/tool: Claude Code (with a sub-agent for apps/dashboard)
-Branch: `chore/p2-reliability` = PR #35 (→ `main`, contains all of PR #34). P0 is `chore/p0-hardening` = PR #34 (→ `main`).
+Branch: `main`. PR #34 (P0 hardening), PR #35 (P2 reliability) and PR #36 (P4 platform) are merged (`12dc48b`).
 
 ## Status of earlier work
 
-- P0 hardening is in PR #34 (`chore/p0-hardening` → `main`). Its required checks passed (Build & typecheck incl. the drift check, CodeQL). Merging was blocked by the agent's auto-mode guard ("merge without review"): the user must merge it, or allow merges for the agent.
+- P0 hardening (PR #34), P2 reliability (PR #35) and P4 platform (PR #36) are merged into `main` (2026-10-08).
+- Workflow from now on: every change goes through a PR with GitHub auto-merge (merge commit). The repository has "Allow auto-merge" enabled at the user's request. `main` requires "Build & typecheck" and CodeQL, and branches must be up to date.
 
-## Completed in this branch (P2 reliability)
+## P2 reliability (PR #35, merged)
 
 - Graceful shutdown (`apps/api/src/lib/shutdown.ts`) for the API and both workers; Docker images run `node`/Next as PID 1; Render runs `pnpm db:migrate` before every service.
 - API Redis client fails fast (2 s); rate limiting fails open; search cache invalidation is an O(1) per-merchant generation bump.
@@ -52,14 +53,11 @@ Branch: `chore/p2-reliability` = PR #35 (→ `main`, contains all of PR #34). P0
 
 ## Blockers and decisions needed
 
-- Merge PR #34 (`chore/p0-hardening`), then PR #35 (`chore/p2-reliability`).
 - Configure the three Shopify compliance topics in the app settings before an App Store submission; legal review of erasure.
 - Email verification for invitations and an error-tracking vendor need product/billing decisions.
 - Strategic positioning vs UCP/ACP (P1).
 
-## P4 platform branch (`chore/p4-platform` = PR #36, stacked on PR #35)
-
-Merge order: PR #34, then PR #35, then retarget PR #36 from `chore/p2-reliability` to `main` and merge it.
+## P4 platform (PR #36, merged)
 
 - Docker images: two-stage builds, runtime holds production dependencies only and runs as `node`; base pinned by version and digest (API 1.56 GB → 529 MB, dashboard 1.64 GB → 725 MB). Verified locally: migrations as `node`, API `/ready`, worker drain on SIGTERM, dashboard pages with Prisma.
 - CI: runs on every PR (stacked ones too), actions pinned by SHA, job timeouts, `/ready` + `/openapi.json` smoke test, Docker image build job that checks the image is non-root; Dependabot watches the Docker base image.
@@ -67,7 +65,15 @@ Merge order: PR #34, then PR #35, then retarget PR #36 from `chore/p2-reliabilit
 - Dashboard route tests: session, role and merchant scoping on the keys and team routes, and the cross-origin rejection on every mutating route (login, invitation acceptance, logout and owner sign-in included). Login and invitation logic keep their own unit tests.
 - Site: no button inside a link, canonical URL, particles and globe lazy-loaded and still under reduced motion (first-load JS 200 kB → 154 kB).
 
+## Shared commerce services (PR #42, merged)
+
+- `apps/api/src/services/` holds search, compare and checkout. The REST routes and the MCP tools both call them: same validation (MCP tool schemas are generated from the shared zod schemas), visibility rules, errors, search cache, agent-query logging and idempotency (`commerce_checkout` takes `idempotency_key`).
+- MCP tools take the REST request bodies and return the REST response bodies. Breaking for MCP clients: search filters are under `filters`.
+- Remote MCP (PR #45): `/mcp` on the API serves the same tools over stateless Streamable HTTP, authenticated with the API key (`Authorization: Bearer` or `X-CAP-Key`). OAuth for web connectors (Claude.ai, ChatGPT) is the next step on this layer.
+- Dependencies: Dependabot updates applied in PR #43; Node majors are no longer proposed for the Docker base (stay on 22 LTS).
+
 ## Next concrete action
 
-- The user merges PR #34 (`chore/p0-hardening`), then PR #35 (`chore/p2-reliability`), then retargets PR #36 (`chore/p4-platform`) to `main` and merges it. The agent's auto-mode guard blocks `gh pr merge`.
+- Deploy `main` (Render blueprint + Vercel), then check `/ready`, the dashboard sign-in and one Shopify install on staging.
+- Then the open decisions above: strategic positioning vs UCP/ACP (P1: A, a GEO/catalog-quality layer that feeds UCP and ACP, recommended in AI_CONTEXT.md; or B, UCP/ACP adapters for non-Shopify stores), Sentry or another error tracker, and email delivery for invitations.
 - No manual resync is needed after deploying. The catalog worker re-enriches every active shop automatically, 10 minutes after starting, because `ENRICHMENT_VERSION` changed. This sets `shopify_updated_at` and re-applies claim filtering.
