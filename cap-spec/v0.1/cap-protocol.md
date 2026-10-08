@@ -48,7 +48,7 @@ MCP clients are bound to a merchant context out-of-band (e.g. via the merchant c
 
 ## 4. Operations
 
-CAP v0.1 defines three operations. Each has a normative HTTP binding and a corresponding MCP tool.
+CAP v0.1 defines three operations. Each has a normative HTTP binding and a corresponding MCP tool. A tool takes the HTTP request body as its arguments and returns the HTTP response body; an error returns the same error envelope with `isError: true`. `commerce_checkout` also accepts `idempotency_key`, with the semantics of the `Idempotency-Key` header.
 
 | Operation | HTTP | MCP tool |
 |---|---|---|

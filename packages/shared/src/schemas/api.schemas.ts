@@ -3,20 +3,24 @@ import { z } from 'zod'
 // ============================================================
 // SEARCH API
 // ============================================================
+// Field descriptions are published in the MCP tool schemas: agents read them.
 export const SearchFiltersSchema = z.object({
-  price_min: z.number().min(0).optional(),
-  price_max: z.number().min(0).optional(),
-  currency: z.string().regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase()).optional(),
-  certifications: z.array(z.string()).optional(),
-  in_stock: z.boolean().optional(),
-  shipping_country: z.string().regex(/^[A-Za-z]{2}$/).transform((value) => value.toUpperCase()).optional(), // ISO 3166-1 alpha-2
-  category: z.string().optional(),
+  price_min: z.number().min(0).optional().describe('Minimum price, in the product currency'),
+  price_max: z.number().min(0).optional().describe('Maximum price, in the product currency'),
+  currency: z.string().regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase()).optional()
+    .describe('ISO 4217 currency code the prices must be in, e.g. "EUR"'),
+  certifications: z.array(z.string()).optional()
+    .describe('Certifications the merchant declared for the product; all must match'),
+  in_stock: z.boolean().optional().describe('true: only purchasable products; false: only unavailable ones'),
+  shipping_country: z.string().regex(/^[A-Za-z]{2}$/).transform((value) => value.toUpperCase()).optional()
+    .describe('ISO 3166-1 alpha-2 country the merchant must ship to, e.g. "FR"'),
+  category: z.string().optional().describe('Text the product category must contain, e.g. "Sneakers"'),
 })
 
 export const SearchRequestSchema = z.object({
-  query: z.string().min(1).max(500),
+  query: z.string().min(1).max(500).describe('Natural-language description of what the shopper wants'),
   filters: SearchFiltersSchema.optional().default({}),
-  limit: z.number().int().min(1).max(50).optional().default(5),
+  limit: z.number().int().min(1).max(50).optional().default(5).describe('Number of results, 1-50'),
   sort: z.enum(['relevance', 'price_asc', 'price_desc', 'geo_score']).optional().default('relevance'),
 })
 
@@ -27,7 +31,7 @@ export type SearchFilters = z.infer<typeof SearchFiltersSchema>
 // COMPARE API
 // ============================================================
 export const CompareRequestSchema = z.object({
-  product_ids: z.array(z.string().uuid()).min(2).max(10),
+  product_ids: z.array(z.string().uuid()).min(2).max(10).describe('2-10 product ids returned by a search'),
   criteria: z.array(z.enum(['price', 'certifications', 'shipping', 'specs', 'return_policy'])).optional().default(['price', 'certifications', 'shipping', 'specs']),
 })
 
@@ -37,12 +41,14 @@ export type CompareRequest = z.infer<typeof CompareRequestSchema>
 // CHECKOUT API
 // ============================================================
 export const CheckoutInitiateSchema = z.object({
-  product_id: z.string().uuid(),
-  variant_id: z.string().optional(),
+  product_id: z.string().uuid().describe('Product id returned by a search'),
+  variant_id: z.string().optional().describe('Variant id (size, color…) from the search result; default: first purchasable variant'),
   quantity: z.number().int().min(1).max(99).default(1),
-  shipping_country: z.string().regex(/^[A-Za-z]{2}$/).transform((value) => value.toUpperCase()).optional().default('FR'),
+  shipping_country: z.string().regex(/^[A-Za-z]{2}$/).transform((value) => value.toUpperCase()).optional().default('FR')
+    .describe('ISO 3166-1 alpha-2 country to ship to'),
   /** UUID returned as `agent_query_id` from POST /v1/search — links checkout analytics to the search */
-  agent_session_id: z.string().uuid().optional(),
+  agent_session_id: z.string().uuid().optional()
+    .describe('agent_query_id returned by the search that led to this checkout'),
 })
 
 export type CheckoutInitiateRequest = z.infer<typeof CheckoutInitiateSchema>
@@ -106,6 +112,8 @@ export interface CompareResponse {
     winner_by_price?: string | undefined
     /** Product with the most merchant-declared certifications */
     winner_by_certifications?: string | undefined
+    /** The compared products, so the matrix columns can be labelled */
+    products: Array<{ id: string; title: string }>
     matrix: Record<string, Record<string, unknown>>
   }
 }
