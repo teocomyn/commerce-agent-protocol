@@ -68,5 +68,5 @@ Branch: `main`. PR #34 (P0 hardening), PR #35 (P2 reliability) and PR #36 (P4 pl
 ## Next concrete action
 
 - Deploy `main` (Render blueprint + Vercel), then check `/ready`, the dashboard sign-in and one Shopify install on staging.
-- Then the open decisions above: positioning (path A or B), Sentry or another error tracker, and email delivery for invitations.
+- Then the open decisions above: strategic positioning vs UCP/ACP (P1: A, a GEO/catalog-quality layer that feeds UCP and ACP, recommended in AI_CONTEXT.md; or B, UCP/ACP adapters for non-Shopify stores), Sentry or another error tracker, and email delivery for invitations.
 - No manual resync is needed after deploying. The catalog worker re-enriches every active shop automatically, 10 minutes after starting, because `ENRICHMENT_VERSION` changed. This sets `shopify_updated_at` and re-applies claim filtering.
