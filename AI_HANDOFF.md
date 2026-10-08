@@ -65,6 +65,12 @@ Branch: `main`. PR #34 (P0 hardening), PR #35 (P2 reliability) and PR #36 (P4 pl
 - Dashboard route tests: session, role and merchant scoping on the keys and team routes, and the cross-origin rejection on every mutating route (login, invitation acceptance, logout and owner sign-in included). Login and invitation logic keep their own unit tests.
 - Site: no button inside a link, canonical URL, particles and globe lazy-loaded and still under reduced motion (first-load JS 200 kB → 154 kB).
 
+## Shared commerce services (PR #42, merged)
+
+- `apps/api/src/services/` holds search, compare and checkout. The REST routes and the MCP tools both call them: same validation (MCP tool schemas are generated from the shared zod schemas), visibility rules, errors, search cache, agent-query logging and idempotency (`commerce_checkout` takes `idempotency_key`).
+- MCP tools take the REST request bodies and return the REST response bodies. Breaking for MCP clients: search filters are under `filters`.
+- Next step for this layer: a remote MCP endpoint (Streamable HTTP, API-key auth) on top of `mcp/tools.ts` (backlog item 24).
+
 ## Next concrete action
 
 - Deploy `main` (Render blueprint + Vercel), then check `/ready`, the dashboard sign-in and one Shopify install on staging.
