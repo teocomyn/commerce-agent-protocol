@@ -69,7 +69,8 @@ Branch: `main`. PR #34 (P0 hardening), PR #35 (P2 reliability) and PR #36 (P4 pl
 
 - `apps/api/src/services/` holds search, compare and checkout. The REST routes and the MCP tools both call them: same validation (MCP tool schemas are generated from the shared zod schemas), visibility rules, errors, search cache, agent-query logging and idempotency (`commerce_checkout` takes `idempotency_key`).
 - MCP tools take the REST request bodies and return the REST response bodies. Breaking for MCP clients: search filters are under `filters`.
-- Next step for this layer: a remote MCP endpoint (Streamable HTTP, API-key auth) on top of `mcp/tools.ts` (backlog item 24).
+- Remote MCP (PR #45): `/mcp` on the API serves the same tools over stateless Streamable HTTP, authenticated with the API key (`Authorization: Bearer` or `X-CAP-Key`). OAuth for web connectors (Claude.ai, ChatGPT) is the next step on this layer.
+- Dependencies: Dependabot updates applied in PR #43; Node majors are no longer proposed for the Docker base (stay on 22 LTS).
 
 ## Next concrete action
 
