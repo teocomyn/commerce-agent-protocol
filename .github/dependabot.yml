@@ -22,7 +22,8 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
-  # Base images are pinned by version and digest in both Dockerfiles.
+  # Base images are pinned by version and digest in both Dockerfiles. Node
+  # major versions are planned upgrades (LTS line, engines, CI), not bumps.
   - package-ecosystem: docker
     directory: "/"
     schedule:
@@ -31,6 +32,9 @@ updates:
     labels:
       - dependencies
       - docker
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions move slowly; monthly is enough. Actions are pinned by commit
   # SHA (with the version in a comment); Dependabot updates both.
