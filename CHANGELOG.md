@@ -11,11 +11,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Authoritative Shopify inventory snapshots with per-location quantities.
 - Shopify shipping and refund policy URLs in search and comparison responses.
 - Variant-level prices, quantities, and availability in search responses.
+- `Idempotency-Key` header on `POST /v1/checkout/initiate`: retries replay the first outcome, success or error (`Idempotent-Replayed: true`), instead of creating another cart; keys are never released.
+- Shopify GDPR compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) and a daily retention job (agent queries 180 days, webhook receipts 30 days, expired tokens and invitations).
+- Graceful shutdown on `SIGTERM` for the API and both workers; containers run `node` as PID 1.
 
 ### Changed
 - Catalog synchronization uses Shopify Admin GraphQL `2026-07` and asynchronously backfills inventory locations.
 - Checkout and search availability now honor untracked inventory and Shopify's `CONTINUE` selling policy.
 - Shopify shipping destinations are synchronized and enforced before cart creation.
+- Enrichment skips the LLM and embedding calls when the product content is unchanged; prices, policies and merchant claims are still refreshed.
+- Inventory snapshots are scheduled after a product row exists, and product re-syncs keep per-location inventory levels.
+- Search cache invalidation bumps a per-merchant generation instead of scanning the Redis keyspace.
+- Every Render service runs migrations before starting.
+- Enrichment jobs never overwrite a newer stored product revision (`products_raw.shopify_updated_at`), and inventory webhooks that arrive before the first per-location snapshot no longer zero the stock.
+- Dashboard sessions are versioned by an atomic `merchant_members.session_version` counter; a routine Shopify re-authorization no longer signs the owner out.
+- The API Redis client fails fast during an outage; rate limiting fails open and `/ready` reports the outage.
 
 ### Fixed
 - Inventory webhooks no longer replace total stock with a single location's quantity.
@@ -23,11 +33,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The stdio MCP server writes only JSON-RPC frames to stdout; logs go to stderr. New entrypoint `pnpm --silent -C apps/api mcp`.
 - The dashboard Docker image requires `NEXT_PUBLIC_API_URL` at build time instead of shipping a bundle that points at localhost.
 - `/openapi.json` defines the `Money` schema it references.
+- Initial inventory snapshots no longer fail and fill the dead-letter queue on large catalogs.
+- Jobs for an uninstalled or erased shop are skipped instead of retried.
 
 ### Security
 - The API, workers, MCP server and dashboard refuse to start with the `.env.example` values of `ENCRYPTION_KEY`, `CAP_OPERATIONS_TOKEN` and `DASHBOARD_SESSION_SECRET`, or with trivially guessable values; in production the Shopify app secret must also be set. Production requires a 32-byte `ENCRYPTION_KEY` (hex or base64); new tokens use the `v2:` ciphertext format, `ENCRYPTION_KEY_PREVIOUS` supports rotation, and `pnpm --filter @cap/api reencrypt-tokens` re-encrypts stored tokens.
 - Invitation acceptance no longer verifies passwords of existing accounts (it requires a session of the invited user instead) and is rate limited per IP and per invitation.
 - Owner sign-in after Shopify OAuth goes through a same-origin confirmation step, closing login CSRF.
+- Uninstalling the app revokes pending invitations and unused sign-in links.
 - Dependency updates clearing every `pnpm audit --prod` finding (3 critical, 9 high): Next.js 15.5.27, MCP SDK 1.32.1, Hono 4.13.13, and patched `sharp`, `fast-uri`, `proxy-addr`, `qs`, `ip-address`, `postcss`, `source-map-js` overrides.
 - Dashboard sends CSP `frame-ancestors 'none'`, HSTS (production), `nosniff`, referrer and permissions policies; the unused `/api/cap` proxy is removed.
 

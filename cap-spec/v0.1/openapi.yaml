@@ -41,9 +41,11 @@ paths:
       description: >-
         Returns products of the calling merchant only. Servers MUST only return
         products the merchant currently offers for sale (for example Shopify
-        status ACTIVE; never drafts or archived products), and `certifications` MUST come from data declared by the
-        merchant: servers MUST NOT infer or generate certifications, labels or
-        environmental claims.
+        status ACTIVE; never draft, archived or unlisted products, and
+        SHOULD exclude products not published to the served channel), and
+        `certifications` MUST come from data declared by the merchant: servers
+        MUST NOT infer or generate certifications, labels or environmental
+        claims.
       requestBody:
         required: true
         content:
@@ -65,6 +67,11 @@ paths:
       tags: [compare]
       summary: Compare products side-by-side
       operationId: compareProducts
+      description: >-
+        Same product data rules as search: only products currently offered for
+        sale are compared, and `certifications` (and
+        `winner_by_certifications`) MUST come from data declared by the
+        merchant, never inferred or generated.
       requestBody:
         required: true
         content:
@@ -86,6 +93,19 @@ paths:
       tags: [checkout]
       summary: Create a checkout session
       operationId: initiateCheckout
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Client-generated key (1-255 ASCII letters, digits, _ - . :).
+            Retrying with the same key and body replays the first response
+            (header Idempotent-Replayed: true) instead of creating a second
+            checkout. Bodies are compared after validation (key order,
+            whitespace and unknown fields do not matter; an omitted field
+            equals its default). Requests rejected before checkout creation
+            (validation, not found, out of stock) do not consume the key.
+          schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,255}$' }
       requestBody:
         required: true
         content:
@@ -102,8 +122,18 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '400':
+          description: Invalid request body or Idempotency-Key
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Out of stock
+          description: Out of stock (OUT_OF_STOCK), same Idempotency-Key still in progress (IDEMPOTENCY_KEY_IN_PROGRESS), or first attempt stopped before recording its outcome (IDEMPOTENCY_KEY_OUTCOME_UNKNOWN; retry with a new key)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Shipping country not served (SHIPPING_COUNTRY_UNAVAILABLE) or Idempotency-Key reused with another body (IDEMPOTENCY_KEY_REUSED)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

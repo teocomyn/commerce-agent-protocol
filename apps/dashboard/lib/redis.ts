@@ -1,4 +1,10 @@
 import Redis from 'ioredis'
+import {
+  API_KEY_CACHE_TOMBSTONE,
+  API_KEY_CACHE_TTL_SECONDS,
+  apiKeyCacheKey,
+  apiKeyRateLimitKey,
+} from '@cap/shared'
 
 const globalForRedis = globalThis as unknown as { capDashboardRedis?: Redis }
 
@@ -7,15 +13,24 @@ export const dashboardRedis = globalForRedis.capDashboardRedis ?? new Redis(
   {
     lazyConnect: true,
     maxRetriesPerRequest: 2,
+    // Fail within 2 s instead of stalling sign-ins on a hung connection.
+    commandTimeout: 2_000,
     enableReadyCheck: false,
   },
 )
 
 if (process.env.NODE_ENV !== 'production') globalForRedis.capDashboardRedis = dashboardRedis
 
+// Writes the tombstone the API checks (see @cap/shared api-key-cache), so a
+// lookup in flight during the revocation cannot cache the key again.
 export async function invalidateApiKeyCache(keyHash: string): Promise<void> {
   try {
-    await dashboardRedis.del(`apikey:${keyHash}`, `rl:${keyHash}`)
+    const results = await dashboardRedis.multi()
+      .set(apiKeyCacheKey(keyHash), JSON.stringify(API_KEY_CACHE_TOMBSTONE), 'EX', API_KEY_CACHE_TTL_SECONDS)
+      .del(apiKeyRateLimitKey(keyHash))
+      .exec()
+    const failure = results?.find(([commandError]) => commandError)?.[0]
+    if (failure) throw failure
   } catch (error) {
     // Revocation is authoritative in Postgres. Surface cache failure so callers
     // don't falsely claim immediate revocation.
@@ -30,10 +45,36 @@ export interface DashboardAttemptResult {
   retryAfterSeconds: number
 }
 
-const ATTEMPT_LIMIT = 10
 const ATTEMPT_WINDOW_SECONDS = 15 * 60
+const INVITATION_ATTEMPT_LIMIT = 10
 
-async function consumeDashboardAttempt(redisKey: string, limit = ATTEMPT_LIMIT): Promise<DashboardAttemptResult> {
+// Login attempts per 15-minute window, counted in independent buckets.
+// See app/api/auth/login/route.ts for how the bucket keys are derived.
+const LOGIN_ATTEMPT_LIMITS = {
+  account: 10, // one email on one shop, from any client address
+  ip: 50, // one client address, across every account
+} as const
+
+export type DashboardLoginBucket = keyof typeof LOGIN_ATTEMPT_LIMITS
+
+// Limits fail open: a Redis outage must not turn a correct password into a
+// 500. Password verification itself still runs on every attempt.
+async function consumeDashboardAttempt(
+  redisKey: string,
+  limit: number,
+): Promise<DashboardAttemptResult> {
+  try {
+    return await countDashboardAttempt(redisKey, limit)
+  } catch (error) {
+    console.warn('[cap-dashboard] Attempt limiter unavailable, allowing request:', error instanceof Error ? error.message : error)
+    return { allowed: true, retryAfterSeconds: 0 }
+  }
+}
+
+async function countDashboardAttempt(
+  redisKey: string,
+  limit: number,
+): Promise<DashboardAttemptResult> {
   const count = await dashboardRedis.incr(redisKey)
   if (count === 1) await dashboardRedis.expire(redisKey, ATTEMPT_WINDOW_SECONDS)
   let ttl = await dashboardRedis.ttl(redisKey)
@@ -49,17 +90,25 @@ async function consumeDashboardAttempt(redisKey: string, limit = ATTEMPT_LIMIT):
   return { allowed: count <= limit, retryAfterSeconds: Math.max(1, ttl) }
 }
 
-export async function consumeDashboardLoginAttempt(key: string): Promise<DashboardAttemptResult> {
-  return consumeDashboardAttempt(`dashboard:login:${key}`)
+export async function consumeDashboardLoginAttempt(
+  bucket: DashboardLoginBucket,
+  key: string,
+): Promise<DashboardAttemptResult> {
+  return consumeDashboardAttempt(`dashboard:login:${bucket}:${key}`, LOGIN_ATTEMPT_LIMITS[bucket])
 }
 
 export async function consumeDashboardInvitationAttempt(
   key: string,
-  limit = ATTEMPT_LIMIT,
+  limit = INVITATION_ATTEMPT_LIMIT,
 ): Promise<DashboardAttemptResult> {
   return consumeDashboardAttempt(`dashboard:invitation:${key}`, limit)
 }
 
-export async function clearDashboardLoginAttempts(key: string): Promise<void> {
-  await dashboardRedis.del(`dashboard:login:${key}`)
+export async function clearDashboardLoginAttempts(
+  bucket: DashboardLoginBucket,
+  key: string,
+): Promise<void> {
+  await dashboardRedis.del(`dashboard:login:${bucket}:${key}`).catch((error: unknown) => {
+    console.warn('[cap-dashboard] Could not reset login attempts:', error instanceof Error ? error.message : error)
+  })
 }

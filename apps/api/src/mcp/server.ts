@@ -6,6 +6,7 @@ import {
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js'
 import { prisma } from '@cap/db'
+import { registerGracefulShutdown } from '../lib/shutdown.js'
 import OpenAI from 'openai'
 import crypto from 'node:crypto'
 import {
@@ -532,4 +533,22 @@ export async function startMcpServer() {
   const transport = new StdioServerTransport()
   await server.connect(transport)
   console.error('[MCP] Commerce Agent Protocol server running (stdio)')
+  return server
+}
+
+/**
+ * Serves MCP over stdio until the client goes away. The SDK transport does not
+ * watch stdin EOF, and the open Postgres pool would keep an orphaned process
+ * alive after every client restart, so EOF and signals both drain and exit.
+ */
+export async function runMcpOverStdio(): Promise<void> {
+  // Every tool needs the merchant: fail the spawn with the configuration
+  // error instead of listing tools that all fail when called.
+  getMcpMerchantId()
+  const server = await startMcpServer()
+  const shutdown = registerGracefulShutdown('mcp', [
+    { name: 'mcp', close: () => server.close() },
+    { name: 'postgres', close: () => prisma.$disconnect() },
+  ])
+  process.stdin.once('end', () => shutdown('client closed stdin'))
 }

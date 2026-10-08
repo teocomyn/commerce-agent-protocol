@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { type FormEvent, useState, useTransition } from 'react'
+import { NETWORK_ERROR_MESSAGE, responseErrorMessage } from '@/lib/response-error'
 
 const inputStyle = {
   width: '100%', padding: '11px 13px', borderRadius: 8,
@@ -21,16 +22,22 @@ export default function LoginForm() {
     event.preventDefault()
     setError(null)
     startTransition(async () => {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, shop }),
-      })
-      const data = await response.json().catch(() => ({})) as { error?: string; redirect?: string }
-      if (!response.ok) {
-        setError(data.error ?? 'Unable to sign in')
+      let response: Response
+      try {
+        response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, shop }),
+        })
+      } catch {
+        setError(NETWORK_ERROR_MESSAGE)
         return
       }
+      if (!response.ok) {
+        setError(await responseErrorMessage(response, 'Unable to sign in'))
+        return
+      }
+      const data = await response.json().catch(() => ({})) as { redirect?: string }
       router.replace(data.redirect ?? '/dashboard')
       router.refresh()
     })

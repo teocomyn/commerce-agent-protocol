@@ -4,6 +4,9 @@ ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 ENV DATABASE_URL=postgresql://build:build@localhost:5432/build
 
+# The start command uses --env-file-if-exists (Node >= 22.9): fail the build,
+# not the deploy, if an older cached node:22-alpine image is used.
+RUN node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 9)) { console.error('Node >= 22.9 required, got ' + process.version); process.exit(1) }"
 RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 RUN apk add --no-cache openssl
 
@@ -23,4 +26,9 @@ RUN pnpm --filter @cap/api... build
 ENV NODE_ENV=production
 EXPOSE 3000
 
-CMD ["pnpm", "--filter", "@cap/api", "start"]
+# Run node directly as PID 1: pnpm does not forward SIGTERM, which would skip
+# the graceful shutdown (draining HTTP requests and active jobs) on deploys.
+# Workers override this with their own `node .../workers/*.worker.js` command.
+# WORKDIR stays /app so Render's `pnpm db:migrate` pre-deploy command resolves
+# the root workspace script.
+CMD ["node", "--env-file-if-exists=.env", "apps/api/dist/apps/api/src/index.js"]

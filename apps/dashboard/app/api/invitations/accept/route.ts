@@ -1,12 +1,15 @@
 import crypto from 'node:crypto'
 import { type NextRequest, NextResponse } from 'next/server'
-import { type MerchantRole, Prisma, prisma } from '@cap/db'
+import { z } from 'zod'
+import { Prisma, prisma } from '@cap/db'
+import { clientAddress, parseJsonBody } from '@/lib/api-route'
 import {
+  type DashboardSession,
   createDashboardSessionToken,
   dashboardSessionCookie,
   getDashboardSession,
-  clientAddress,
   isSameOriginMutation,
+  membershipVersion,
 } from '@/lib/dashboard-session'
 import {
   hashHumanPassword,
@@ -17,6 +20,14 @@ import {
 import { consumeDashboardInvitationAttempt } from '@/lib/redis'
 
 const SIGN_IN_REQUIRED = 'Sign in with the invited account, then open this invitation link again.'
+const SIGN_OUT_REQUIRED = 'You are signed in with another account. Sign out, then open this invitation link again.'
+
+// name and password are only used when the invitee creates a new password.
+const acceptInvitationSchema = z.object({
+  token: z.string(),
+  name: z.string().trim().max(255).optional(),
+  password: z.string().optional(),
+})
 
 class InvitationRejected extends Error {
   status: number
@@ -39,14 +50,9 @@ export async function POST(req: NextRequest) {
   if (!isSameOriginMutation(req)) {
     return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })
   }
-  const body = await req.json().catch(() => null) as {
-    token?: unknown
-    name?: unknown
-    password?: unknown
-  } | null
-  const rawToken = typeof body?.token === 'string' ? body.token : ''
-  const name = typeof body?.name === 'string' ? body.name.trim().slice(0, 255) : ''
-  const password = typeof body?.password === 'string' ? body.password : ''
+  const body = await parseJsonBody(req, acceptInvitationSchema, 'Invalid invitation details')
+  if (!body.ok) return body.response
+  const { token: rawToken, name = '', password = '' } = body.value
   if (!isInvitationTokenFormat(rawToken)) {
     return NextResponse.json({ error: 'Invalid invitation details' }, { status: 400 })
   }
@@ -85,13 +91,17 @@ export async function POST(req: NextRequest) {
     select: { id: true, passwordHash: true },
   })
 
+  const session = await getDashboardSession()
   let acceptance: Acceptance
   if (existingUser?.passwordHash) {
-    const session = await getDashboardSession()
     if (!session || session.userId !== existingUser.id) {
       return NextResponse.json({ error: SIGN_IN_REQUIRED }, { status: 401 })
     }
     acceptance = { kind: 'existing-account', userId: session.userId }
+  } else if (session && session.userId !== existingUser?.id) {
+    // Creating the invited account here would silently replace the signed-in
+    // session with another account's; the page asks to sign out first.
+    return NextResponse.json({ error: SIGN_OUT_REQUIRED }, { status: 409 })
   } else {
     const passwordError = validateHumanPassword(password)
     if (!name || passwordError) {
@@ -100,7 +110,7 @@ export async function POST(req: NextRequest) {
     acceptance = { kind: 'new-password', name, passwordHash: await hashHumanPassword(password) }
   }
 
-  let accepted: { userId: string; merchantId: string; role: MerchantRole }
+  let accepted: Omit<DashboardSession, 'expiresAt'>
   try {
     accepted = await prisma.$transaction(async (tx) => {
       const claimed = await tx.merchantInvitation.updateMany({
@@ -156,9 +166,16 @@ export async function POST(req: NextRequest) {
           merchantId: invitation.merchantId,
           role: invitation.role,
         },
-        update: { role: invitation.role, revokedAt: null },
+        // Incrementing the version signs out sessions issued for an earlier
+        // membership of this user at this merchant.
+        update: { role: invitation.role, revokedAt: null, sessionVersion: { increment: 1 } },
       })
-      return { userId, merchantId: membership.merchantId, role: membership.role }
+      return {
+        userId,
+        merchantId: membership.merchantId,
+        role: membership.role,
+        mv: membershipVersion(membership),
+      }
     })
   } catch (error) {
     // Throwing rolls the whole transaction back, so a rejected attempt never

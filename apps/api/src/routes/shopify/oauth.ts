@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { Hono } from 'hono'
-import { prisma } from '@cap/db'
+import { Prisma, prisma } from '@cap/db'
 import {
   buildInstallUrl,
   exchangeCodeForToken,
@@ -143,11 +143,34 @@ oauthRouter.get('/callback', async (c) => {
     create: { externalId: `shopify:${shop}`, name: shopConfiguration.name },
     update: { name: shopConfiguration.name },
   })
-  await prisma.merchantMember.upsert({
+  // Re-authorizing (e.g. a scope update) must not sign the owner out of
+  // every device: the membership is only written, and its session version
+  // bumped, when it actually changes.
+  const ownerMembership = await prisma.merchantMember.findUnique({
     where: { userId_merchantId: { userId: user.id, merchantId: merchant.id } },
-    create: { userId: user.id, merchantId: merchant.id, role: 'OWNER' },
-    update: { role: 'OWNER', revokedAt: null },
+    select: { role: true, revokedAt: true },
   })
+  const restoreOwner = () => prisma.merchantMember.updateMany({
+    where: {
+      userId: user.id,
+      merchantId: merchant.id,
+      OR: [{ role: { not: 'OWNER' } }, { revokedAt: { not: null } }],
+    },
+    data: { role: 'OWNER', revokedAt: null, sessionVersion: { increment: 1 } },
+  })
+  if (!ownerMembership) {
+    try {
+      await prisma.merchantMember.create({
+        data: { userId: user.id, merchantId: merchant.id, role: 'OWNER' },
+      })
+    } catch (error) {
+      // A concurrent callback for the same shop created it first.
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) throw error
+      await restoreOwner()
+    }
+  } else if (ownerMembership.role !== 'OWNER' || ownerMembership.revokedAt) {
+    await restoreOwner()
+  }
 
   // Trigger full catalog sync (ignored if one is already waiting or running)
   await queueFullCatalogSync(merchant.id, shop, { jobId: `install-sync-${merchant.id}-${Date.now()}` })

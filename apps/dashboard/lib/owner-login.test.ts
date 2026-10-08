@@ -46,6 +46,31 @@ describe('Shopify owner sign-in tokens', () => {
         where: { tokenHash: hashOwnerLoginToken(token) },
       }))
     })
+
+    const now = new Date('2026-10-08T12:00:00Z')
+    const pendingRow = {
+      id: 'login-token',
+      userId: 'user',
+      merchantId: 'merchant',
+      expiresAt: new Date(now.getTime() + 60_000),
+      consumedAt: null,
+      merchant: { shopifyDomain: 'shop.myshopify.com', uninstalledAt: null },
+    }
+
+    it('returns the row of a pending token', async () => {
+      findUniqueMock.mockResolvedValueOnce(pendingRow)
+      await expect(findPendingOwnerLoginToken(crypto.randomBytes(32).toString('base64url'), now))
+        .resolves.toEqual(pendingRow)
+    })
+
+    it.each([
+      ['unknown', null],
+      ['consumed', { ...pendingRow, consumedAt: new Date(now.getTime() - 1_000) }],
+      ['uninstalled-merchant', { ...pendingRow, merchant: { ...pendingRow.merchant, uninstalledAt: now } }],
+    ])('rejects an %s token', async (_case, row) => {
+      findUniqueMock.mockResolvedValueOnce(row)
+      await expect(findPendingOwnerLoginToken(crypto.randomBytes(32).toString('base64url'), now)).resolves.toBeNull()
+    })
   })
 
   it('stores the same SHA-256 hex digest as the API', () => {

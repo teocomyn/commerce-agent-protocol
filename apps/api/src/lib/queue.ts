@@ -29,6 +29,17 @@ export const catalogSyncQueue = new Queue('catalog-sync', {
   },
 })
 
+// Daily housekeeping (data retention). Processed by the catalog worker.
+export const maintenanceQueue = new Queue('maintenance', {
+  connection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 60_000 },
+    removeOnComplete: { count: 30 },
+    removeOnFail: { count: 30 },
+  },
+})
+
 /**
  * Queues a full catalog sync of one shop. Every producer (OAuth install,
  * operations resync, re-enrichment after a release) shares one deduplication
@@ -39,9 +50,14 @@ export const catalogSyncQueue = new Queue('catalog-sync', {
 export async function queueFullCatalogSync(
   merchantId: string,
   shopDomain: string,
-  options: { jobId: string; delay?: number; priority?: number },
+  options: { jobId: string; delay?: number; priority?: number; unlessEnrichmentVersion?: string },
 ): Promise<boolean> {
-  const job = await catalogSyncQueue.add('full-catalog-sync', { merchantId, shopDomain }, {
+  const data: FullCatalogSyncJobData = {
+    merchantId,
+    shopDomain,
+    ...(options.unlessEnrichmentVersion && { unlessEnrichmentVersion: options.unlessEnrichmentVersion }),
+  }
+  const job = await catalogSyncQueue.add('full-catalog-sync', data, {
     jobId: options.jobId,
     deduplication: { id: `full-sync-${merchantId}` },
     ...(options.delay !== undefined && { delay: options.delay }),
@@ -58,6 +74,24 @@ export const deadLetterQueue = new Queue('dead-letter', {
     removeOnFail: { count: 5_000 },
   },
 })
+
+const pendingDeadLetterWrites = new Set<Promise<void>>()
+
+/**
+ * Records a failed job in the dead-letter queue without blocking the worker's
+ * event handler, while keeping track of the write so shutdown can await it
+ * before closing the queue.
+ */
+export function recordDeadLetter(sourceQueue: string, job: Job | undefined, error: Error): void {
+  const write = sendToDeadLetter(sourceQueue, job, error)
+    .catch((writeError: unknown) => console.error('[DLQ] Failed to record dead letter:', writeError))
+    .finally(() => pendingDeadLetterWrites.delete(write))
+  pendingDeadLetterWrites.add(write)
+}
+
+export async function flushDeadLetterWrites(): Promise<void> {
+  await Promise.all([...pendingDeadLetterWrites])
+}
 
 export async function sendToDeadLetter(
   sourceQueue: string,
@@ -91,6 +125,11 @@ export interface FullCatalogSyncJobData {
   shopDomain: string
   kind?: 'full-catalog'
   cursor?: string // Pagination cursor for resume
+  /**
+   * Re-enrichment after a release: skipped when, by the time it runs, a full
+   * sync already ran under this ENRICHMENT_VERSION (install or manual resync).
+   */
+  unlessEnrichmentVersion?: string
 }
 
 export interface InventorySyncJobData {
@@ -98,6 +137,8 @@ export interface InventorySyncJobData {
   shopDomain: string
   kind: 'inventory'
   inventoryItemId: string
+  /** Set on the single delayed retry when the product was not stored yet. */
+  deferred?: boolean
 }
 
 export type CatalogSyncJobData = FullCatalogSyncJobData | InventorySyncJobData
@@ -107,15 +148,17 @@ export type CatalogSyncJobData = FullCatalogSyncJobData | InventorySyncJobData
 // ============================================================
 
 export async function getQueueStats() {
-  const [enrichmentCounts, catalogCounts, deadLetterCounts] = await Promise.all([
+  const [enrichmentCounts, catalogCounts, maintenanceCounts, deadLetterCounts] = await Promise.all([
     enrichmentQueue.getJobCounts('waiting', 'active', 'completed', 'failed'),
     catalogSyncQueue.getJobCounts('waiting', 'active', 'completed', 'failed'),
+    maintenanceQueue.getJobCounts('waiting', 'active', 'completed', 'failed'),
     deadLetterQueue.getJobCounts('waiting', 'active', 'completed', 'failed'),
   ])
 
   return {
     enrichment: enrichmentCounts,
     catalogSync: catalogCounts,
+    maintenance: maintenanceCounts,
     deadLetter: deadLetterCounts,
   }
 }

@@ -10,7 +10,7 @@
     "dev:worker:enrichment": "tsx watch --env-file=../../.env src/workers/enrichment.worker.ts",
     "dev:worker:catalog": "tsx watch --env-file=../../.env src/workers/catalog-sync.worker.ts",
     "dev:workers": "concurrently -n enrich,sync -c cyan,magenta \"pnpm run dev:worker:enrichment\" \"pnpm run dev:worker:catalog\"",
-    "mcp": "tsx --env-file=../../.env src/mcp/stdio.ts",
+    "mcp": "tsx --env-file-if-exists=../../.env src/mcp/stdio.ts",
     "seed": "tsx --env-file=../../.env src/scripts/seed.ts",
     "reencrypt-tokens": "tsx --env-file-if-exists=../../.env src/scripts/reencrypt-tokens.ts",
     "build": "tsc && tsc-alias",

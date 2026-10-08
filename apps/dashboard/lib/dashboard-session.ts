@@ -11,7 +11,34 @@ export interface DashboardSession {
   userId: string
   merchantId: string
   role: MerchantRole
+  /** Membership version: MerchantMember.sessionVersion when the session was issued. */
+  mv: number
   expiresAt: number
+}
+
+/** Membership fields that decide whether a signed session is still valid. */
+export interface SessionMembership {
+  role: MerchantRole
+  revokedAt: Date | null
+  sessionVersion: number
+}
+
+export function membershipVersion(membership: Pick<SessionMembership, 'sessionVersion'>): number {
+  return membership.sessionVersion
+}
+
+/**
+ * A session stays valid only while its membership is active, has the same
+ * role, and its session version has not moved since the session was issued.
+ * Role changes, revocations, re-invitations and owner reinstatement increment
+ * the version atomically, which invalidates all sessions issued before it.
+ */
+export function isSessionMembershipCurrent(
+  session: Pick<DashboardSession, 'role' | 'mv'>,
+  membership: SessionMembership | null,
+): boolean {
+  if (!membership || membership.revokedAt) return false
+  return membership.role === session.role && membershipVersion(membership) === session.mv
 }
 
 function signature(payload: string): string {
@@ -23,7 +50,10 @@ export function createDashboardSessionToken(
   nowMs = Date.now(),
 ): string {
   const payload = Buffer.from(JSON.stringify({
-    ...session,
+    userId: session.userId,
+    merchantId: session.merchantId,
+    role: session.role,
+    mv: session.mv,
     expiresAt: Math.floor(nowMs / 1000) + SESSION_TTL_SECONDS,
   })).toString('base64url')
   return `${payload}.${signature(payload)}`
@@ -49,6 +79,8 @@ export function verifyDashboardSessionToken(
       !parsed.userId ||
       !parsed.merchantId ||
       !['OWNER', 'ADMIN', 'ANALYST'].includes(parsed.role) ||
+      // Sessions issued before membership versioning carry no mv: reject them.
+      !Number.isSafeInteger(parsed.mv) ||
       !Number.isInteger(parsed.expiresAt) ||
       parsed.expiresAt <= Math.floor(nowMs / 1000)
     ) {
@@ -77,11 +109,10 @@ export async function getDashboardSession(
         merchantId: session.merchantId,
       },
     },
-    select: { role: true, revokedAt: true },
+    select: { role: true, revokedAt: true, sessionVersion: true },
   })
 
-  if (!membership || membership.revokedAt || membership.role !== session.role) return null
-  return session
+  return isSessionMembershipCurrent(session, membership) ? session : null
 }
 
 export function dashboardSessionCookie(token: string) {

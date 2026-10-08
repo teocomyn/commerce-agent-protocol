@@ -1,6 +1,6 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import crypto from 'node:crypto'
-import { prisma } from '@cap/db'
+import { Prisma, prisma, type AgentCheckout } from '@cap/db'
 import {
   CheckoutInitiateSchema,
   type CAPError,
@@ -11,6 +11,11 @@ import {
   ShopifyCartError,
 } from '../lib/shopify.js'
 import { capJsonValidator } from '../lib/validation.js'
+import {
+  IDEMPOTENCY_IN_PROGRESS_MS,
+  OUTCOME_UNKNOWN_BODY,
+  storedOutcome,
+} from '../lib/checkout-idempotency.js'
 import { isVariantPurchasable } from '../lib/inventory.js'
 import { supportsShippingCountry } from '../lib/commerce-policies.js'
 
@@ -36,11 +41,59 @@ interface CheckoutInitiateResponse {
   expires_at: string
 }
 
+// Idempotency-Key: same key + same body replays the first outcome (success or
+// error) instead of creating a second Shopify cart; same key + different body
+// is rejected. Keys are never released: after a failure, or when the outcome
+// is unknown (crash or timeout around the Shopify call), the agent retries
+// with a new key. Reusing the key could otherwise create a second cart.
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_.:-]{1,255}$/
+function replayIdempotentCheckout(c: Context, previous: AgentCheckout, requestHash: string) {
+  if (previous.requestHash !== requestHash) {
+    return c.json<CAPError>({
+      error: {
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: 'This Idempotency-Key was already used with a different request body',
+      },
+    }, 422)
+  }
+  const outcome = storedOutcome(previous.response)
+  if (outcome) {
+    c.header('Idempotent-Replayed', 'true')
+    return c.json(outcome.body as CAPError, outcome.status)
+  }
+  if (Date.now() - previous.createdAt.getTime() > IDEMPOTENCY_IN_PROGRESS_MS) {
+    return c.json<CAPError>(OUTCOME_UNKNOWN_BODY, 409)
+  }
+  return c.json<CAPError>({
+    error: {
+      code: 'IDEMPOTENCY_KEY_IN_PROGRESS',
+      message: 'A checkout with this Idempotency-Key is still being created; retry shortly',
+    },
+  }, 409)
+}
+
 // POST /v1/checkout/initiate
 checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async (c) => {
   const auth = c.get('auth')
   const body = c.req.valid('json')
   const { product_id, variant_id, quantity, shipping_country, agent_session_id } = body
+
+  const idempotencyKey = c.req.header('Idempotency-Key')
+  if (idempotencyKey !== undefined && !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+    return c.json<CAPError>({
+      error: {
+        code: 'INVALID_IDEMPOTENCY_KEY',
+        message: 'Idempotency-Key must be 1-255 characters of letters, digits, "_", "-", ".", or ":"',
+      },
+    }, 400)
+  }
+  const requestHash = crypto.createHash('sha256').update(JSON.stringify(body)).digest('hex')
+  if (idempotencyKey) {
+    const previous = await prisma.agentCheckout.findUnique({
+      where: { merchantId_idempotencyKey: { merchantId: auth.merchantId, idempotencyKey } },
+    })
+    if (previous) return replayIdempotentCheckout(c, previous, requestHash)
+  }
 
   // 1. Fetch the enriched product joined with the raw product (for variants) and merchant (for tokens)
   const product = await prisma.productEnriched.findUnique({
@@ -152,22 +205,44 @@ checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async
     resolvedAgentQueryId = aq?.id ?? null
   }
 
+  // Decrypted before the row exists: an unreadable token (key rotation
+  // mistake) fails the request without leaving the Idempotency-Key pending.
+  const storefrontToken = decryptToken(product.merchant.storefrontToken)
+
   // Persist before the upstream call. The opaque token is copied into Shopify
   // cart attributes and later returned on the order webhook.
   const trackingToken = crypto.randomBytes(32).toString('hex')
-  const agentCheckout = await prisma.agentCheckout.create({
-    data: {
-      merchantId: product.merchantId,
-      productId: product.id,
-      trackingToken,
-      status: 'creating',
-      currency: product.currency,
-      agentQueryId: resolvedAgentQueryId,
-    },
-  })
+  let agentCheckout: AgentCheckout
+  try {
+    agentCheckout = await prisma.agentCheckout.create({
+      data: {
+        merchantId: product.merchantId,
+        productId: product.id,
+        trackingToken,
+        status: 'creating',
+        currency: product.currency,
+        agentQueryId: resolvedAgentQueryId,
+        ...(idempotencyKey && { idempotencyKey, requestHash }),
+      },
+    })
+  } catch (error) {
+    // A concurrent request with the same Idempotency-Key won the race.
+    if (idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      const previous = await prisma.agentCheckout.findUnique({
+        where: { merchantId_idempotencyKey: { merchantId: auth.merchantId, idempotencyKey } },
+      })
+      if (previous) return replayIdempotentCheckout(c, previous, requestHash)
+      return c.json<CAPError>({
+        error: {
+          code: 'IDEMPOTENCY_KEY_IN_PROGRESS',
+          message: 'A checkout with this Idempotency-Key is still being created; retry shortly',
+        },
+      }, 409)
+    }
+    throw error
+  }
 
   // 4. Create the Shopify Cart (replaces deprecated checkoutCreate)
-  const storefrontToken = decryptToken(product.merchant.storefrontToken)
   let cart
   try {
     cart = await createShopifyCart(product.merchant.shopifyDomain, storefrontToken, {
@@ -177,34 +252,35 @@ checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async
       trackingToken,
     })
   } catch (err) {
-    await prisma.agentCheckout.update({
-      where: { id: agentCheckout.id },
-      data: { status: 'failed' },
-    }).catch(() => undefined)
     const userErrors =
       err instanceof ShopifyCartError ? err.userErrors : undefined
-    return c.json<CAPError>({
+    const errorBody: CAPError = {
       error: {
         code: 'CHECKOUT_FAILED',
         message:
           err instanceof Error ? err.message : 'Failed to create Shopify cart',
         details: userErrors,
       },
-    }, 502)
+    }
+    // The error is stored for replay and the key stays taken: a timeout may
+    // still have created the cart, so retrying under the same key is unsafe.
+    // If this write fails, the replay reports an unknown outcome instead.
+    await prisma.agentCheckout.update({
+      where: { id: agentCheckout.id },
+      data: {
+        status: 'failed',
+        ...(idempotencyKey && {
+          response: { status: 502, body: errorBody } as unknown as Prisma.InputJsonValue,
+        }),
+      },
+    }).catch((updateError: unknown) => {
+      console.error('[Checkout] Failed to record checkout failure:', updateError)
+    })
+    return c.json<CAPError>(errorBody, 502)
   }
 
   // 5. Attach the upstream cart to the pre-created checkout record.
   const totalAmount = parseFloat(cart.totalAmount)
-  await prisma.agentCheckout.update({
-    where: { id: agentCheckout.id },
-    data: {
-      shopifyCheckoutId: cart.cartId,
-      status: 'pending',
-      amount: Number.isFinite(totalAmount) ? totalAmount : null,
-      currency: cart.currency,
-    },
-  })
-
   const response: CheckoutInitiateResponse = {
     checkout_id: cart.cartId,
     checkout_url: cart.checkoutUrl,
@@ -225,6 +301,19 @@ checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async
     // Shopify carts have a 10-day idle TTL; surface a conservative 24h window.
     expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
   }
+
+  await prisma.agentCheckout.update({
+    where: { id: agentCheckout.id },
+    data: {
+      shopifyCheckoutId: cart.cartId,
+      status: 'pending',
+      amount: Number.isFinite(totalAmount) ? totalAmount : null,
+      currency: cart.currency,
+      ...(idempotencyKey && {
+        response: { status: 200, body: response } as unknown as Prisma.InputJsonValue,
+      }),
+    },
+  })
 
   return c.json(response)
 })

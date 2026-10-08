@@ -8,5 +8,5 @@ routeConsoleToStderr()
 const { assertRuntimeSecrets } = await import('../lib/secrets.js')
 assertRuntimeSecrets(process.env, { mode: 'mcp' })
 
-const { startMcpServer } = await import('./server.js')
-await startMcpServer()
+const { runMcpOverStdio } = await import('./server.js')
+await runMcpOverStdio()

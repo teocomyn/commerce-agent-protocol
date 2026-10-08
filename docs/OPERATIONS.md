@@ -33,9 +33,42 @@ Alert immediately when `/ready` is non-200, the dead-letter queue is non-empty, 
 
 The `catalog-sync` queue contains both full catalog pulls and authoritative inventory snapshots. An `inventory_levels/update` webhook applies a fail-closed local update immediately, then schedules an `inventory-level-sync` job to refresh the total and per-location quantities from Admin GraphQL. A sustained inventory-job backlog means checkout availability may remain conservatively unavailable until the catalog worker catches up.
 
+Initial inventory snapshots are scheduled by each enrichment job once the product row exists, and only for inventory items whose per-location levels are missing or no longer match the aggregate stock. Product re-syncs keep known levels. Jobs for a shop that is uninstalled or erased are skipped, not retried.
+
+Enrichment calls the LLM and the embedding model only when the product content changes (title, description, vendor, type, tags, first three images, and `ENRICHMENT_VERSION`). Price, stock, policy, and metafield changes are applied without an OpenAI call. Bump `ENRICHMENT_VERSION` in `apps/api/src/lib/enrichment-output.ts` after changing the prompt or the output schema to re-enrich every product on its next sync.
+
+## Data retention and GDPR
+
+The catalog worker runs a `maintenance` job every day at 03:00 UTC (BullMQ job scheduler `daily-retention`). It deletes:
+
+- agent queries older than `AGENT_QUERY_RETENTION_DAYS` (default 180): they contain free text typed by shoppers;
+- processed webhook receipts older than `WEBHOOK_EVENT_RETENTION_DAYS` (default 30);
+- dashboard login tokens one day after expiry or use, and invitations 30 days after expiry, acceptance, or revocation;
+- and it marks checkouts stuck in `creating` for over a day as `failed`, storing an "outcome unknown" answer for their idempotency key (the key is never released, because the Shopify cart may exist).
+
+Agent queries without a merchant (from an erased shop or recorded before `merchant_id` existed) are deleted by the same job. A `shop/redact` received for a shop that is not marked uninstalled fails on purpose (`webhook_events.status = failed`, HTTP 500) so Shopify redelivers it; investigate why `app/uninstalled` was missed.
+
+Shopify compliance webhooks are handled on the same `/webhooks/shopify` endpoint. Configure the three topics in the Shopify app (Dev Dashboard or `shopify.app.toml` `compliance_topics`); they cannot be registered through the Admin API:
+
+- `customers/data_request`: CAP keeps no customer profile, so the request is acknowledged and recorded.
+- `customers/redact`: the Shopify order ids listed in `orders_to_redact` are removed from `agent_checkouts`.
+- `shop/redact`: if the shop is uninstalled, every row of that merchant is deleted (products, keys, checkouts, agent queries, members, and accounts that belonged only to that shop). A `shop/redact` for a shop that is still installed erases nothing and fails on purpose (see above), so Shopify redelivers it.
+
+Have the export and erasure behaviour reviewed legally before an App Store submission.
+
+## Deploys and shutdown
+
+Every service runs `pnpm db:migrate` as its Render pre-deploy command (Prisma takes an advisory lock, so concurrent runs are safe), so workers and the dashboard never start against an older schema. Keep migrations backward-compatible with the previous release.
+
+Processes run `node` directly as PID 1 and handle `SIGTERM`: the API stops accepting connections and drains in-flight requests (25 s budget), workers wait for their active jobs (110 s budget, below `maxShutdownDelaySeconds: 120`), then queues, Redis, and Postgres connections close. A process that does not drain in time exits with status 1. The stdio MCP server drains the same way when its client closes stdin, so it never lingers with open database connections.
+
+If Redis becomes unavailable, API commands fail after about two seconds instead of hanging: authentication falls back to Postgres, the search cache is bypassed, and per-key rate limiting fails open (logged) while `/ready` reports the outage.
+
 ## Full catalog resync
 
-`POST /internal/operations/catalog-sync` with `{"confirm":true}` queues a full catalog sync for every active install and returns `{ "queued": n, "ignored": m }`: a shop whose full sync (from an install, an earlier resync or any other producer) is still waiting or running is not queued again and counts as ignored. Use it after a release that changes stored product data. It calls Shopify for every product and OpenAI for every active product on each run, so run it once, not on a schedule. 
+`POST /internal/operations/catalog-sync` with `{"confirm":true}` queues a full catalog sync for every active install and returns `{ "queued": n, "ignored": m }`: a shop whose full sync (from an install, an earlier resync, a re-enrichment or any other producer) is still waiting or running is not queued again and counts as ignored. Use it after a release that changes stored product data outside enrichment. It calls Shopify for every product, but OpenAI only for active products whose title, description, vendor, type, tags or images changed since their last enrichment. Run it once, not on a schedule.
+
+A release that bumps `ENRICHMENT_VERSION` needs no manual step: when the catalog worker starts, it queues one full sync (delayed 10 minutes, so every service runs the new release first) for each active shop whose last full sync ran under another version, and the job is skipped if a full sync already ran under the new version by the time it starts. Expect one OpenAI call per active product of those shops.
 
 A full sync reads every product, active or not, so a product that became a draft or was archived while its webhook was missed is hidden on the next sync. Inactive products only have their stored status updated: they are not enriched and get no inventory job.
 

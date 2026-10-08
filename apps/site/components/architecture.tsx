@@ -61,7 +61,7 @@ export function Architecture() {
             <FlowNode label="SHOPIFY" sub="only platform today" />
             <FlowArrow label="OAuth" />
             <FlowNode label="CAP" sub="protocol + infra" variant="primary" />
-            <FlowArrow label="REST: API key" />
+            <FlowArrow label="MCP · REST: API key" />
             <div className="flex flex-col gap-3">
               <FlowNode label="CLAUDE DESKTOP" sub="mcp stdio" variant="pulse" />
               <FlowNode label="CURSOR" sub="mcp stdio" variant="pulse" />

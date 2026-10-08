@@ -2,6 +2,7 @@
   "$schema": "https://turbo.build/schema.json",
   "ui": "tui",
   "globalEnv": [
+    "AGENT_QUERY_RETENTION_DAYS",
     "API_PORT",
     "CAP_MERCHANT_ID",
     "CAP_OPERATIONS_TOKEN",
@@ -17,7 +18,8 @@
     "SHOPIFY_API_SECRET",
     "SHOPIFY_API_VERSION",
     "SHOPIFY_APP_URL",
-    "SHOPIFY_SCOPES"
+    "SHOPIFY_SCOPES",
+    "WEBHOOK_EVENT_RETENTION_DAYS"
   ],
   "tasks": {
     "build": {

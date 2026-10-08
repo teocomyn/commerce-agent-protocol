@@ -1,6 +1,9 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { NETWORK_ERROR_MESSAGE, responseErrorMessage } from '@/lib/response-error'
+
+type Role = 'OWNER' | 'ADMIN' | 'ANALYST'
 
 interface ApiKey {
   id: string
@@ -13,38 +16,76 @@ interface ApiKey {
 interface ApiKeysClientProps {
   keys: ApiKey[]
   merchantDomain: string | null
+  /** Hides controls the role cannot use; the API routes enforce the same rule. */
+  role: Role | null
 }
 
-export default function ApiKeysClient({ keys, merchantDomain }: ApiKeysClientProps) {
+interface CreatedKey {
+  key: string
+  id: string
+  prefix: string
+  label: string | null
+  createdAt: string
+}
+
+export default function ApiKeysClient({ keys, merchantDomain, role }: ApiKeysClientProps) {
   const [apiKeys, setApiKeys] = useState(keys)
   const [newKeyValue, setNewKeyValue] = useState<string | null>(null)
   const [label, setLabel] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  // Outcome of a successful action; failures go to `error`.
+  const [notice, setNotice] = useState<{ tone: 'success' | 'warning'; text: string } | null>(null)
   const [isPending, startTransition] = useTransition()
+  const canManageKeys = role === 'OWNER' || role === 'ADMIN'
 
   function createKey() {
+    setError(null)
+    setNotice(null)
     startTransition(async () => {
-      const res = await fetch('/api/keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label }),
-      })
-      if (!res.ok) return
-      const data = await res.json() as { key?: string; id?: string; prefix?: string; label?: string | null; createdAt?: string }
-      if (data.key) {
+      try {
+        const res = await fetch('/api/keys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label }),
+        })
+        if (!res.ok) {
+          setError(await responseErrorMessage(res, 'Unable to create the API key'))
+          return
+        }
+        const data = await res.json() as CreatedKey
         setNewKeyValue(data.key)
         setApiKeys(prev => [
-          { id: data.id!, prefix: data.prefix!, label: data.label ?? null, lastUsedAt: null, createdAt: data.createdAt! },
+          { id: data.id, prefix: data.prefix, label: data.label, lastUsedAt: null, createdAt: data.createdAt },
           ...prev,
         ])
         setLabel('')
+      } catch {
+        setError(NETWORK_ERROR_MESSAGE)
       }
     })
   }
 
   function revokeKey(id: string) {
+    setError(null)
+    setNotice(null)
     startTransition(async () => {
-      const response = await fetch(`/api/keys/${id}`, { method: 'DELETE' })
-      if (response.ok) setApiKeys(prev => prev.filter(k => k.id !== id))
+      try {
+        const response = await fetch(`/api/keys/${id}`, { method: 'DELETE' })
+        if (!response.ok) {
+          setError(await responseErrorMessage(response, 'Unable to revoke the API key'))
+          return
+        }
+        setApiKeys(prev => prev.filter(k => k.id !== id))
+        const result = await response.json().catch(() => ({})) as { effectiveWithinSeconds?: number }
+        setNotice(result.effectiveWithinSeconds
+          ? {
+              tone: 'warning',
+              text: `Key revoked. It may keep working for up to ${result.effectiveWithinSeconds} seconds while caches expire.`,
+            }
+          : { tone: 'success', text: 'Key revoked. It no longer authenticates requests.' })
+      } catch {
+        setError(NETWORK_ERROR_MESSAGE)
+      }
     })
   }
 
@@ -76,55 +117,69 @@ export default function ApiKeysClient({ keys, merchantDomain }: ApiKeysClientPro
         </code>
       </div>
 
-      {/* Create new key */}
-      <div className="glass" style={{ padding: 24, borderRadius: 16, marginBottom: 24 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 600, margin: '0 0 16px' }}>Create New Key</h2>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <input
-            type="text"
-            value={label}
-            onChange={e => setLabel(e.target.value)}
-            placeholder="Key label (e.g. Claude Plugin, Test)"
-            style={{
-              flex: 1, padding: '10px 14px', borderRadius: 8,
-              background: 'var(--bg-primary)', border: '1px solid var(--border)',
-              color: 'var(--text-primary)', fontSize: 14, outline: 'none',
-            }}
-          />
-          <button
-            onClick={createKey}
-            disabled={isPending || !merchantDomain}
-            style={{
-              padding: '10px 20px', borderRadius: 8, border: 'none',
-              background: 'linear-gradient(135deg, #6c63ff, #a78bfa)',
-              color: 'white', fontWeight: 600, fontSize: 14, cursor: 'pointer',
-              opacity: isPending || !merchantDomain ? 0.7 : 1,
-            }}
-          >
-            {isPending ? 'Creating…' : '+ Create Key'}
-          </button>
+      {error && <div role="alert" style={{ color: 'var(--danger)', marginBottom: 16, fontSize: 13 }}>{error}</div>}
+      {notice && (
+        <div role="status" style={{ color: notice.tone === 'warning' ? 'var(--warning)' : 'var(--success)', marginBottom: 16, fontSize: 13 }}>
+          {notice.text}
         </div>
+      )}
 
-        {/* Show newly created key */}
-        {newKeyValue && (
-          <div style={{ marginTop: 16, padding: 16, borderRadius: 10, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)' }}>
-            <div style={{ fontSize: 12, color: '#22c55e', fontWeight: 600, marginBottom: 8 }}>
-              ✅ Key created — copy it now, it won&apos;t be shown again!
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <code style={{ flex: 1, fontFamily: 'JetBrains Mono, monospace', fontSize: 14, color: 'var(--text-primary)', wordBreak: 'break-all' }}>
-                {newKeyValue}
-              </code>
-              <button
-                onClick={() => navigator.clipboard.writeText(newKeyValue)}
-                style={{ padding: '6px 12px', borderRadius: 6, background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', color: '#22c55e', cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' }}
-              >
-                Copy
-              </button>
-            </div>
+      {/* Create new key */}
+      {canManageKeys ? (
+        <div className="glass" style={{ padding: 24, borderRadius: 16, marginBottom: 24 }}>
+          <h2 style={{ fontSize: 15, fontWeight: 600, margin: '0 0 16px' }}>Create New Key</h2>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <input
+              type="text"
+              value={label}
+              maxLength={255}
+              onChange={e => setLabel(e.target.value)}
+              placeholder="Key label (e.g. Claude Plugin, Test)"
+              style={{
+                flex: 1, padding: '10px 14px', borderRadius: 8,
+                background: 'var(--bg-primary)', border: '1px solid var(--border)',
+                color: 'var(--text-primary)', fontSize: 14, outline: 'none',
+              }}
+            />
+            <button
+              onClick={createKey}
+              disabled={isPending || !merchantDomain}
+              style={{
+                padding: '10px 20px', borderRadius: 8, border: 'none',
+                background: 'linear-gradient(135deg, #6c63ff, #a78bfa)',
+                color: 'white', fontWeight: 600, fontSize: 14, cursor: 'pointer',
+                opacity: isPending || !merchantDomain ? 0.7 : 1,
+              }}
+            >
+              {isPending ? 'Creating…' : '+ Create Key'}
+            </button>
           </div>
-        )}
-      </div>
+
+          {/* Show newly created key */}
+          {newKeyValue && (
+            <div style={{ marginTop: 16, padding: 16, borderRadius: 10, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)' }}>
+              <div style={{ fontSize: 12, color: '#22c55e', fontWeight: 600, marginBottom: 8 }}>
+                ✅ Key created — copy it now, it won&apos;t be shown again!
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <code style={{ flex: 1, fontFamily: 'JetBrains Mono, monospace', fontSize: 14, color: 'var(--text-primary)', wordBreak: 'break-all' }}>
+                  {newKeyValue}
+                </code>
+                <button
+                  onClick={() => navigator.clipboard.writeText(newKeyValue)}
+                  style={{ padding: '6px 12px', borderRadius: 6, background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', color: '#22c55e', cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' }}
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: '0 0 24px' }}>
+          Your role can view API keys. Ask an owner or admin to create or revoke keys.
+        </p>
+      )}
 
       {/* Keys list */}
       <div className="glass" style={{ borderRadius: 16, overflow: 'hidden' }}>
@@ -134,13 +189,13 @@ export default function ApiKeysClient({ keys, merchantDomain }: ApiKeysClientPro
 
         {apiKeys.length === 0 ? (
           <div style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
-            No API keys yet. Create one above.
+            {canManageKeys ? 'No API keys yet. Create one above.' : 'No API keys yet.'}
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: 'rgba(0,0,0,0.2)' }}>
-                {['Key', 'Label', 'Last Used', 'Created', ''].map(h => (
+                {['Key', 'Label', 'Last Used', 'Created', ...(canManageKeys ? [''] : [])].map(h => (
                   <th key={h} style={{ padding: '10px 20px', textAlign: 'left', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{h}</th>
                 ))}
               </tr>
@@ -160,14 +215,17 @@ export default function ApiKeysClient({ keys, merchantDomain }: ApiKeysClientPro
                   <td style={{ padding: '14px 20px', fontSize: 12, color: 'var(--text-secondary)' }}>
                     {new Date(key.createdAt).toLocaleDateString()}
                   </td>
-                  <td style={{ padding: '14px 20px' }}>
-                    <button
-                      onClick={() => revokeKey(key.id)}
-                      style={{ padding: '5px 12px', borderRadius: 6, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444', cursor: 'pointer', fontSize: 12 }}
-                    >
-                      Revoke
-                    </button>
-                  </td>
+                  {canManageKeys && (
+                    <td style={{ padding: '14px 20px' }}>
+                      <button
+                        onClick={() => revokeKey(key.id)}
+                        disabled={isPending}
+                        style={{ padding: '5px 12px', borderRadius: 6, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444', cursor: 'pointer', fontSize: 12 }}
+                      >
+                        Revoke
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { prisma } from '@cap/db'
 import { SearchRequestSchema, type SearchResponse } from '@cap/shared'
-import { cacheGet, cacheSet } from '../lib/redis.js'
+import { cacheGet, cacheSet, searchCacheKey } from '../lib/redis.js'
 import OpenAI from 'openai'
 import { capJsonValidator } from '../lib/validation.js'
 import { isVariantPurchasable } from '../lib/inventory.js'
@@ -12,7 +12,7 @@ const openai = new OpenAI({
   maxRetries: 2,
 })
 const searchRouter = new Hono()
-const SEARCH_CACHE_VERSION = 'v2'
+const SEARCH_CACHE_TTL_SECONDS = 120
 
 function detectAgentType(userAgent: string): string {
   const ua = userAgent.toLowerCase()
@@ -69,10 +69,8 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
   const searchId = `srch_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`
 
   // Cache is scoped per-merchant to honor the multi-tenant filter
-  // The version segment retires entries cached by older releases, whose
-  // responses may contain inactive products or removed fields.
-  const cacheKey = `search:${auth.merchantId}:${SEARCH_CACHE_VERSION}:${JSON.stringify({ query, filters, limit, sort })}`
-  const cached = await cacheGet<SearchResponse>(cacheKey)
+  const cacheKey = await searchCacheKey(auth.merchantId, { query, filters, limit, sort })
+  const cached = cacheKey ? await cacheGet<SearchResponse>(cacheKey) : null
   if (cached) {
     const latency = Date.now() - startTime
     const agentQueryId = await persistAgentQuery({
@@ -96,9 +94,11 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
   }
 
   // Relevance uses embeddings when available, with a lexical fallback so an
-  // OpenAI outage does not take product discovery offline.
+  // OpenAI outage does not take product discovery offline. Without Redis
+  // (no cache key) rate limiting fails open too, so the paid embedding call is
+  // skipped and lexical search is used until Redis is back.
   let embeddingStr: string | null = null
-  if (sort === 'relevance') {
+  if (sort === 'relevance' && cacheKey) {
     try {
       const embeddingResponse = await openai.embeddings.create({
         model: 'text-embedding-3-small',
@@ -343,7 +343,7 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
     latency_ms: latency,
   }
 
-  await cacheSet(cacheKey, response, 120)
+  if (cacheKey) await cacheSet(cacheKey, response, SEARCH_CACHE_TTL_SECONDS)
   return c.json(response)
 })
 

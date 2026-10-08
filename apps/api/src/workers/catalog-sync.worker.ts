@@ -1,11 +1,24 @@
 import { Worker } from 'bullmq'
 import { prisma, type Prisma } from '@cap/db'
-import { bullmqConnection, catalogSyncQueue, enrichmentQueue, sendToDeadLetter, type CatalogSyncJobData } from '../lib/queue.js'
+import {
+  bullmqConnection,
+  catalogSyncQueue,
+  deadLetterQueue,
+  enrichmentQueue,
+  maintenanceQueue,
+  flushDeadLetterWrites,
+  recordDeadLetter,
+  type CatalogSyncJobData,
+} from '../lib/queue.js'
+import { runRetention } from '../lib/retention.js'
+import { ENRICHMENT_VERSION } from '../lib/enrichment-output.js'
+import { fullSyncRanUnder, queueOutdatedEnrichmentResyncs } from '../lib/enrichment-backfill.js'
 import { fetchShopifyInventorySnapshot, fetchShopifyProducts } from '../lib/shopify.js'
-import { getValidShopifyAdminToken } from '../lib/shopify-token.js'
+import { InactiveInstallError, getValidShopifyAdminToken } from '../lib/shopify-token.js'
 import { applyInventorySnapshot } from '../lib/inventory.js'
-import { invalidateMerchantSearchCache } from '../lib/redis.js'
+import { invalidateMerchantSearchCache, redis } from '../lib/redis.js'
 import { assertRuntimeSecrets } from '../lib/secrets.js'
+import { registerGracefulShutdown } from '../lib/shutdown.js'
 
 assertRuntimeSecrets(process.env, { mode: 'worker' })
 
@@ -13,7 +26,14 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
   'catalog-sync',
   async (job) => {
     const { merchantId, shopDomain } = job.data
-    const token = await getValidShopifyAdminToken(merchantId)
+    let token: string
+    try {
+      token = await getValidShopifyAdminToken(merchantId)
+    } catch (error) {
+      if (!(error instanceof InactiveInstallError)) throw error
+      console.log(`[CatalogSync] Skipping job ${job.id}: ${shopDomain} is no longer installed`)
+      return { skipped: 'merchant-inactive' }
+    }
 
     if (job.data.kind === 'inventory') {
       const snapshot = await fetchShopifyInventorySnapshot(
@@ -30,8 +50,18 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
             WHERE variant->>'inventory_item_id' = ${String(snapshot.inventory_item_id)}
           )
       `
+      // Product not synchronized yet. Its enrichment job schedules a snapshot
+      // once the row exists; in case that job never runs, look once more
+      // later instead of dropping a webhook-driven update.
       if (products.length === 0) {
-        throw new Error(`Inventory item ${snapshot.inventory_item_id} is not normalized yet`)
+        if (!job.data.deferred) {
+          await catalogSyncQueue.add(
+            'inventory-level-sync',
+            { ...job.data, deferred: true },
+            { delay: 120_000, priority: 2, jobId: `${job.id}-deferred` },
+          )
+        }
+        return { inventoryItemId: snapshot.inventory_item_id, productsUpdated: 0, skipped: 'not-normalized' }
       }
       await prisma.$transaction(products.map((product) => prisma.productRaw.update({
         where: { id: product.id },
@@ -44,7 +74,14 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
       return { inventoryItemId: snapshot.inventory_item_id, productsUpdated: products.length }
     }
 
-    const { cursor } = job.data
+    const { cursor, unlessEnrichmentVersion } = job.data
+
+    if (unlessEnrichmentVersion) {
+      if (await fullSyncRanUnder(merchantId, unlessEnrichmentVersion)) {
+        console.log(`[CatalogSync] Skipping job ${job.id}: ${shopDomain} was already synced under ${unlessEnrichmentVersion}`)
+        return { skipped: 'enrichment-current' }
+      }
+    }
 
     console.log(`[CatalogSync] Starting sync for ${shopDomain} (cursor: ${cursor ?? 'start'})`)
 
@@ -64,10 +101,21 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
       const activeProducts = products.filter((product) => product.status === 'active')
       const inactiveProducts = products.filter((product) => product.status !== 'active')
       if (inactiveProducts.length > 0) {
-        await prisma.$transaction(inactiveProducts.map((product) => prisma.productRaw.updateMany({
-          where: { merchantId, shopifyId: BigInt(product.id), status: { not: product.status } },
-          data: { status: product.status, syncedAt: new Date() },
-        })))
+        await prisma.$transaction(inactiveProducts.map((product) => {
+          // Same freshness rule as the enrichment pipeline: a page read before
+          // a newer webhook was applied must not overwrite that state.
+          const shopifyUpdatedAt = new Date(product.updated_at)
+          const fresh = !Number.isNaN(shopifyUpdatedAt.getTime())
+          return prisma.productRaw.updateMany({
+            where: {
+              merchantId,
+              shopifyId: BigInt(product.id),
+              status: { not: product.status },
+              ...(fresh && { OR: [{ shopifyUpdatedAt: null }, { shopifyUpdatedAt: { lte: shopifyUpdatedAt } }] }),
+            },
+            data: { status: product.status, syncedAt: new Date(), ...(fresh && { shopifyUpdatedAt }) },
+          })
+        }))
         await invalidateMerchantSearchCache(merchantId)
       }
 
@@ -87,20 +135,10 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
         },
       }))
 
+      // Inventory snapshots are scheduled by each enrichment job once its
+      // product row exists; scheduling them here raced the enrichment and
+      // filled the dead-letter queue on large catalogs.
       await enrichmentQueue.addBulk(enrichmentJobs)
-
-      const inventoryItemIds = new Set(activeProducts.flatMap((product) => product.variants.flatMap(
-        (variant) => variant.inventory_item_id == null ? [] : [String(variant.inventory_item_id)],
-      )))
-      await catalogSyncQueue.addBulk([...inventoryItemIds].map((inventoryItemId) => ({
-        name: 'inventory-level-sync',
-        data: { merchantId, shopDomain, kind: 'inventory' as const, inventoryItemId },
-        opts: {
-          priority: 2,
-          delay: 30_000,
-          jobId: `initial-inventory-${merchantId}-${inventoryItemId}-${job.id}`,
-        },
-      })))
 
       totalProcessed += products.length
       pageInfo = nextPageInfo
@@ -119,6 +157,8 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
       SET settings = COALESCE(settings, '{}'::jsonb) || ${JSON.stringify({
         lastFullSync: new Date().toISOString(),
         totalProducts: totalProcessed,
+        // Every product was queued for enrichment under this version.
+        enrichmentVersion: ENRICHMENT_VERSION,
       })}::jsonb,
       updated_at = NOW()
       WHERE id = ${merchantId}::uuid
@@ -137,7 +177,55 @@ export const catalogSyncWorker = new Worker<CatalogSyncJobData>(
 
 catalogSyncWorker.on('failed', (job, err) => {
   console.error(`[CatalogSync] Job ${job?.id} failed:`, err)
-  void sendToDeadLetter('catalog-sync', job, err)
+  recordDeadLetter('catalog-sync', job, err)
 })
+
+// Daily data retention (GDPR) at 03:00 UTC. upsertJobScheduler is idempotent,
+// so every worker start converges on a single schedule.
+export const maintenanceWorker = new Worker(
+  'maintenance',
+  async () => {
+    const result = await runRetention()
+    console.log('[Maintenance] Retention completed:', result)
+    return result
+  },
+  { connection: bullmqConnection, concurrency: 1 },
+)
+
+maintenanceWorker.on('failed', (job, err) => {
+  console.error(`[Maintenance] Job ${job?.id} failed:`, err)
+  recordDeadLetter('maintenance', job, err)
+})
+
+registerGracefulShutdown('catalog-worker', [
+  // Waits for active jobs (a page of the catalog or a snapshot) to finish.
+  { name: 'workers', close: () => Promise.all([catalogSyncWorker.close(), maintenanceWorker.close()]) },
+  { name: 'dead-letter writes', close: () => flushDeadLetterWrites() },
+  {
+    name: 'queues',
+    close: () => Promise.all([
+      enrichmentQueue.close(),
+      catalogSyncQueue.close(),
+      maintenanceQueue.close(),
+      deadLetterQueue.close(),
+    ]),
+  },
+  { name: 'redis', close: () => redis.quit() },
+  { name: 'postgres', close: () => prisma.$disconnect() },
+], 110_000)
+
+// Registered after the shutdown handler and not awaited: a Redis outage at
+// startup must not block the process before it can react to SIGTERM.
+void maintenanceQueue.upsertJobScheduler(
+  'daily-retention',
+  { pattern: '0 3 * * *', tz: 'UTC' },
+  { name: 'retention' },
+).catch((error: unknown) => console.error('[Maintenance] Could not register the daily retention schedule:', error))
+
+void queueOutdatedEnrichmentResyncs()
+  .then((queued) => {
+    if (queued > 0) console.log(`[CatalogSync] ${queued} shop(s) queued for re-enrichment (version ${ENRICHMENT_VERSION})`)
+  })
+  .catch((error: unknown) => console.error('[CatalogSync] Could not queue re-enrichment after a version change:', error))
 
 console.log('[Worker] Catalog sync worker started')

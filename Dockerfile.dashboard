@@ -24,13 +24,12 @@ COPY . .
 # fail the build instead of shipping a bundle that points at localhost.
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-RUN case "$NEXT_PUBLIC_API_URL" in \
-      "" ) echo "NEXT_PUBLIC_API_URL build arg is required" >&2; exit 1 ;; \
-      *localhost*|*127.0.0.1*|*0.0.0.0*|*'[::1]'* ) echo "NEXT_PUBLIC_API_URL must not point at a local address: $NEXT_PUBLIC_API_URL" >&2; exit 1 ;; \
-    esac
+RUN node apps/dashboard/scripts/check-public-api-url.mjs
 RUN pnpm --filter @cap/dashboard... build
 
 ENV NODE_ENV=production
 EXPOSE 3001
 
-CMD ["pnpm", "--filter", "@cap/dashboard", "start"]
+# exec keeps Next.js as PID 1 so it receives SIGTERM and drains on deploys
+# (pnpm does not forward signals). Render injects PORT.
+CMD ["sh", "-c", "cd apps/dashboard && exec node node_modules/next/dist/bin/next start --port \"${PORT:-3001}\""]

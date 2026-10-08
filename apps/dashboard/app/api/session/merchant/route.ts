@@ -5,11 +5,11 @@ import {
   dashboardPublicOrigin,
   dashboardSessionCookie,
   isSameOriginMutation,
+  membershipVersion,
 } from '@/lib/dashboard-session'
 import {
   OWNER_LOGIN_COOKIE,
   findPendingOwnerLoginToken,
-  isOwnerLoginTokenFormat,
   ownerLoginCookieOptions,
 } from '@/lib/owner-login'
 
@@ -25,10 +25,12 @@ export async function GET(req: NextRequest) {
   // Public origin, not req.url: behind the proxy req.url is http, and the
   // browser would not send the Secure handoff cookie to the next page.
   const response = NextResponse.redirect(new URL('/session/confirm', dashboardPublicOrigin(req)), 303)
-  if (isOwnerLoginTokenFormat(rawToken)) {
+  // Only a pending token replaces the handoff cookie (read-only lookup, no
+  // session): a crafted link with a well-formed but unknown token must not
+  // clobber a sign-in in progress. Otherwise the confirmation page shows the
+  // pending sign-in, if any, or that the link expired.
+  if (await findPendingOwnerLoginToken(rawToken)) {
     response.cookies.set(OWNER_LOGIN_COOKIE, rawToken, ownerLoginCookieOptions())
-  } else {
-    response.cookies.set(OWNER_LOGIN_COOKIE, '', ownerLoginCookieOptions(0))
   }
   response.headers.set('Cache-Control', 'no-store')
   response.headers.set('Referrer-Policy', 'no-referrer')
@@ -39,6 +41,7 @@ export async function POST(req: NextRequest) {
   if (!isSameOriginMutation(req)) {
     return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })
   }
+  // The sign-in token travels in the HttpOnly handoff cookie, not in the body.
   const rawToken = req.cookies.get(OWNER_LOGIN_COOKIE)?.value ?? ''
   const body = await req.json().catch(() => null) as { merchantId?: unknown } | null
   // A broken request is not "another store connected": answer it as such.
@@ -67,7 +70,7 @@ export async function POST(req: NextRequest) {
         merchantId: loginToken.merchantId,
       },
     },
-    select: { role: true, revokedAt: true },
+    select: { role: true, revokedAt: true, sessionVersion: true },
   })
   if (!membership || membership.revokedAt) {
     return NextResponse.json({ error: 'Membership is not active' }, { status: 403 })
@@ -85,6 +88,7 @@ export async function POST(req: NextRequest) {
     userId: loginToken.userId,
     merchantId: loginToken.merchantId,
     role: membership.role,
+    mv: membershipVersion(membership),
   })
   const response = NextResponse.json({ authenticated: true, redirect: '/dashboard' })
   const cookie = dashboardSessionCookie(sessionToken)

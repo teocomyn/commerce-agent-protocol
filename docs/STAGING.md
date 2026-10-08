@@ -22,7 +22,7 @@ Provide these values only on the `cap-staging-api` service during the initial Bl
 - `SHOPIFY_API_KEY`
 - `SHOPIFY_API_SECRET`
 - `SHOPIFY_SCOPES`
-- `ENCRYPTION_KEY` (`openssl rand -hex 32`; string-format keys are rejected in production mode)
+- `ENCRYPTION_KEY` (`openssl rand -hex 32`; string-format keys are rejected whenever `NODE_ENV=production`, which staging also sets, whatever `CAP_ENV` says)
 - `CAP_OPERATIONS_TOKEN` (`openssl rand -hex 32`, staging-only)
 
 Set `SHOPIFY_SCOPES` to the value documented in `.env.example`. The catalog query now requires `read_locations`, `read_legal_policies`, and `read_markets_home` in addition to product and inventory access. Re-authorize the development store after changing scopes.

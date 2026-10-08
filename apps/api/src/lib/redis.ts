@@ -1,14 +1,25 @@
+import crypto from 'node:crypto'
 import Redis from 'ioredis'
+import {
+  API_KEY_CACHE_TOMBSTONE,
+  API_KEY_CACHE_TTL_SECONDS,
+  apiKeyCacheKey,
+  apiKeyRateLimitKey,
+} from '@cap/shared'
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379'
 
-// Singleton Redis client
+// Singleton Redis client for cache, rate limits, OAuth nonces and locks.
+// BullMQ uses its own connections (see redis-connection.ts), so this client
+// can fail fast: during a Redis outage commands reject after ~2 s instead of
+// queueing forever and hanging every API request.
 let redisInstance: Redis | null = null
 
 export function getRedis(): Redis {
   if (!redisInstance) {
     redisInstance = new Redis(redisUrl, {
-      maxRetriesPerRequest: null, // Required for BullMQ
+      maxRetriesPerRequest: 1,
+      commandTimeout: 2_000,
       enableReadyCheck: false,
       lazyConnect: true,
     })
@@ -41,23 +52,72 @@ export async function cacheSet(key: string, value: unknown, ttlSeconds = 300): P
   await redis.setex(key, ttlSeconds, JSON.stringify(value)).catch(() => undefined)
 }
 
+// Only writes when the key is absent, so it never replaces an invalidation
+// tombstone (see API_KEY_CACHE_TOMBSTONE).
+export async function cacheSetIfAbsent(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+  await redis.set(key, JSON.stringify(value), 'EX', ttlSeconds, 'NX').catch(() => undefined)
+}
+
+/** Invalidates cached API key lookups and resets their rate-limit windows. */
+export async function invalidateApiKeyCache(keyHashes: string[]): Promise<void> {
+  if (keyHashes.length === 0) return
+  const transaction = redis.multi()
+  for (const keyHash of keyHashes) {
+    transaction.set(apiKeyCacheKey(keyHash), JSON.stringify(API_KEY_CACHE_TOMBSTONE), 'EX', API_KEY_CACHE_TTL_SECONDS)
+    transaction.del(apiKeyRateLimitKey(keyHash))
+  }
+  const results = await transaction.exec()
+  const failure = results?.find(([error]) => error)?.[0]
+  if (failure) throw failure
+}
+
 export async function cacheDel(key: string): Promise<void> {
   await redis.del(key).catch(() => undefined)
 }
 
+// Search results are cached under a per-merchant generation number. Bumping
+// the generation invalidates every cached search of that merchant in O(1),
+// instead of scanning the whole keyspace (BullMQ keys included) on each
+// webhook; old entries simply expire with their TTL.
+const searchGenerationKey = (merchantId: string) => `search:gen:${merchantId}`
+// Bump when the search response shape or visibility rules change, so entries
+// cached by an older release are never served after a deploy.
+const SEARCH_CACHE_VERSION = 'v3'
+
+export async function searchCacheKey(merchantId: string, request: unknown): Promise<string | null> {
+  try {
+    const generation = (await redis.get(searchGenerationKey(merchantId))) ?? '0'
+    const digest = crypto.createHash('sha256').update(JSON.stringify(request)).digest('hex')
+    return `search:${merchantId}:${SEARCH_CACHE_VERSION}:${generation}:${digest}`
+  } catch {
+    return null
+  }
+}
+
+// Best effort: a failed invalidation leaves results stale for at most the
+// search cache TTL, which must not fail a webhook or an enrichment job.
 export async function invalidateMerchantSearchCache(merchantId: string): Promise<void> {
-  let cursor = '0'
-  do {
-    const [nextCursor, keys] = await redis.scan(
-      cursor,
-      'MATCH',
-      `search:${merchantId}:*`,
-      'COUNT',
-      100,
-    )
-    cursor = nextCursor
-    if (keys.length > 0) await redis.unlink(...keys)
-  } while (cursor !== '0')
+  try {
+    await redis.incr(searchGenerationKey(merchantId))
+  } catch (error) {
+    console.warn('[Redis] Search cache invalidation failed:', error instanceof Error ? error.message : error)
+  }
+}
+
+/**
+ * Deletes every cached search of a merchant, for shop erasure: a generation
+ * bump only hides the entries until they expire, and an erased shop's
+ * catalog must not stay in Redis at all.
+ */
+export async function purgeMerchantSearchCache(merchantId: string): Promise<void> {
+  const keys: string[] = []
+  for await (const batch of redis.scanStream({ match: `search:${merchantId}:*`, count: 500 })) {
+    keys.push(...(batch as string[]))
+  }
+  keys.push(searchGenerationKey(merchantId))
+  for (let index = 0; index < keys.length; index += 500) {
+    await redis.del(...keys.slice(index, index + 500))
+  }
 }
 
 // Rate limiting: sliding window counter

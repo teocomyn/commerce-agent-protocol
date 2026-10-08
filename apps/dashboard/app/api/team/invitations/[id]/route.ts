@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@cap/db'
-import { getDashboardSession, isSameOriginMutation } from '@/lib/dashboard-session'
+import { isSameOriginMutation } from '@/lib/dashboard-session'
+import { isUuid, requireDashboardSession } from '@/lib/api-route'
 
 export async function DELETE(
   req: NextRequest,
@@ -9,9 +10,11 @@ export async function DELETE(
   if (!isSameOriginMutation(req)) {
     return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })
   }
-  const session = await getDashboardSession(['OWNER'])
-  if (!session) return NextResponse.json({ error: 'Owner role required' }, { status: 403 })
+  const auth = await requireDashboardSession(['OWNER'], 'Owner role required')
+  if (!auth.ok) return auth.response
+  const session = auth.value
   const { id } = await params
+  if (!isUuid(id)) return NextResponse.json({ error: 'Invitation not found' }, { status: 404 })
   const revoked = await prisma.merchantInvitation.updateMany({
     where: {
       id,

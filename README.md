@@ -63,7 +63,7 @@ Diagrams: [`cap_system_architecture_overview.svg`](./cap_system_architecture_ove
 
 ## Quick start
 
-**Requirements:** Node ≥ 22, pnpm ≥ 9, Docker.
+**Requirements:** Node ≥ 22.9, pnpm ≥ 9, Docker.
 
 ```bash
 # 1. Local Postgres (with pgvector) + Redis
@@ -71,8 +71,8 @@ docker compose up -d
 
 # 2. Environment
 cp .env.example .env
-# Fill in at minimum: DATABASE_URL, REDIS_URL, OPENAI_API_KEY, and SHOPIFY_*
-# if you connect a store. Replace every `change_me` value: processes refuse to
+# Fill in at minimum: DATABASE_URL, REDIS_URL, OPENAI_API_KEY, ENCRYPTION_KEY,
+# and SHOPIFY_* if you connect a store. Replace every `change_me` value: processes refuse to
 # start with example secrets. Generate secrets with:
 openssl rand -hex 32   # ENCRYPTION_KEY, CAP_OPERATIONS_TOKEN, DASHBOARD_SESSION_SECRET
 
@@ -106,6 +106,8 @@ curl -X POST http://localhost:3000/v1/search \
   -H "Content-Type: application/json" \
   -d '{"query":"white eco-friendly sneakers under 120","limit":3}'
 ```
+
+Send an `Idempotency-Key` header on `POST /v1/checkout/initiate`: a retried request with the same key and body returns the first outcome (checkout or error) instead of creating a second Shopify cart. Keys are never released; to try again after a failure, use a new key.
 
 **Run as MCP server** (stdio, for Claude Desktop / Cursor):
 

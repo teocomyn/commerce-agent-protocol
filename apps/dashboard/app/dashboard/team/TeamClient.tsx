@@ -1,6 +1,7 @@
 'use client'
 
 import { type FormEvent, useCallback, useEffect, useState, useTransition } from 'react'
+import { NETWORK_ERROR_MESSAGE, responseErrorMessage } from '@/lib/response-error'
 
 type Role = 'OWNER' | 'ADMIN' | 'ANALYST'
 
@@ -33,21 +34,29 @@ const buttonStyle = {
   background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)',
 }
 
-export default function TeamClient() {
+export default function TeamClient({ role }: { role: Role | null }) {
   const [data, setData] = useState<TeamData | null>(null)
+  // Team management is owner-only. This only hides controls; the API routes
+  // enforce the same rule. The server-rendered role is used until /api/team
+  // answers, then every reload follows the current membership.
+  const canManage = data ? data.canManage : role === 'OWNER'
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState<'ADMIN' | 'ANALYST'>('ANALYST')
+  const [inviteRole, setInviteRole] = useState<'ADMIN' | 'ANALYST'>('ANALYST')
   const [invitationUrl, setInvitationUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
   const loadTeam = useCallback(async () => {
-    const response = await fetch('/api/team', { cache: 'no-store' })
-    if (!response.ok) {
-      setError('Unable to load the team')
-      return
+    try {
+      const response = await fetch('/api/team', { cache: 'no-store' })
+      if (!response.ok) {
+        setError(await responseErrorMessage(response, 'Unable to load the team'))
+        return
+      }
+      setData(await response.json() as TeamData)
+    } catch {
+      setError(NETWORK_ERROR_MESSAGE)
     }
-    setData(await response.json() as TeamData)
   }, [])
 
   useEffect(() => {
@@ -56,14 +65,17 @@ export default function TeamClient() {
 
   async function mutation(url: string, method: 'PATCH' | 'DELETE', body?: object) {
     setError(null)
-    const response = await fetch(url, {
-      method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    })
-    const result = await response.json().catch(() => ({})) as { error?: string }
+    let response: Response
+    try {
+      response = await fetch(url, body
+        ? { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+        : { method })
+    } catch {
+      setError(NETWORK_ERROR_MESSAGE)
+      return false
+    }
     if (!response.ok) {
-      setError(result.error ?? 'The operation failed')
+      setError(await responseErrorMessage(response, 'The operation failed'))
       return false
     }
     await loadTeam()
@@ -75,16 +87,22 @@ export default function TeamClient() {
     setError(null)
     setInvitationUrl(null)
     startTransition(async () => {
-      const response = await fetch('/api/team', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, role }),
-      })
-      const result = await response.json().catch(() => ({})) as { error?: string; invitationUrl?: string }
-      if (!response.ok) {
-        setError(result.error ?? 'Unable to create the invitation')
+      let response: Response
+      try {
+        response = await fetch('/api/team', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, role: inviteRole }),
+        })
+      } catch {
+        setError(NETWORK_ERROR_MESSAGE)
         return
       }
+      if (!response.ok) {
+        setError(await responseErrorMessage(response, 'Unable to create the invitation'))
+        return
+      }
+      const result = await response.json().catch(() => ({})) as { invitationUrl?: string }
       setInvitationUrl(result.invitationUrl ?? null)
       setEmail('')
       await loadTeam()
@@ -106,7 +124,7 @@ export default function TeamClient() {
         </p>
       </div>
 
-      {data?.canManage && (
+      {canManage && (
         <div className="glass" style={{ padding: 24, borderRadius: 16, marginBottom: 24 }}>
           <h2 style={{ fontSize: 15, margin: '0 0 16px' }}>Invite a team member</h2>
           <form onSubmit={invite} style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -119,8 +137,8 @@ export default function TeamClient() {
               style={{ flex: '1 1 260px', padding: '10px 13px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
             />
             <select
-              value={role}
-              onChange={(event) => setRole(event.target.value as 'ADMIN' | 'ANALYST')}
+              value={inviteRole}
+              onChange={(event) => setInviteRole(event.target.value as 'ADMIN' | 'ANALYST')}
               style={{ padding: '10px 13px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
             >
               <option value="ANALYST">Analyst</option>
@@ -161,7 +179,7 @@ export default function TeamClient() {
               <div style={{ fontWeight: 600, fontSize: 14 }}>{member.name ?? member.email ?? 'Shopify owner'} {member.isCurrentUser && <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>(you)</span>}</div>
               {member.email && member.name && <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 2 }}>{member.email}</div>}
             </div>
-            {data.canManage && member.role !== 'OWNER' && !member.isCurrentUser && !member.revokedAt ? (
+            {canManage && member.role !== 'OWNER' && !member.isCurrentUser && !member.revokedAt ? (
               <select
                 value={member.role}
                 disabled={isPending}
@@ -172,7 +190,7 @@ export default function TeamClient() {
                 <option value="ANALYST">Analyst</option>
               </select>
             ) : <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{member.role.toLowerCase()}</span>}
-            {data.canManage && member.role !== 'OWNER' && !member.isCurrentUser && !member.revokedAt && (
+            {canManage && member.role !== 'OWNER' && !member.isCurrentUser && !member.revokedAt && (
               <button type="button" disabled={isPending} onClick={() => runMutation(`/api/team/${member.id}`, 'DELETE')} style={{ ...buttonStyle, color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.3)' }}>Revoke</button>
             )}
             {member.revokedAt && <span style={{ color: 'var(--danger)', fontSize: 11 }}>revoked</span>}
@@ -192,7 +210,7 @@ export default function TeamClient() {
                 <div style={{ color: 'var(--text-secondary)', fontSize: 11, marginTop: 2 }}>Expires {new Date(invitation.expiresAt).toLocaleDateString()}</div>
               </div>
               <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{invitation.role.toLowerCase()}</span>
-              {data.canManage && <button type="button" disabled={isPending} onClick={() => runMutation(`/api/team/invitations/${invitation.id}`, 'DELETE')} style={{ ...buttonStyle, color: 'var(--danger)' }}>Cancel</button>}
+              {canManage && <button type="button" disabled={isPending} onClick={() => runMutation(`/api/team/invitations/${invitation.id}`, 'DELETE')} style={{ ...buttonStyle, color: 'var(--danger)' }}>Cancel</button>}
             </div>
           ))}
         </div>

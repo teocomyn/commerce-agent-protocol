@@ -1,9 +1,39 @@
 import crypto from 'node:crypto'
-import { promisify } from 'node:util'
 
-const scryptAsync = promisify(crypto.scrypt)
-const SCRYPT_KEY_LENGTH = 32
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1_000
+
+export const MIN_HUMAN_PASSWORD_LENGTH = 12
+export const MAX_HUMAN_PASSWORD_LENGTH = 256
+
+interface ScryptParams {
+  N: number
+  r: number
+  p: number
+}
+
+// Current format: scrypt$N=32768,r=8,p=1$<salt base64>$<key base64>.
+// The parameters travel with each hash so they can be raised later; verification
+// always uses the stored parameters and needsRehash() flags weaker hashes.
+const SCRYPT_PARAMS: ScryptParams = { N: 2 ** 15, r: 8, p: 1 }
+const SCRYPT_KEY_LENGTH = 64
+const SCRYPT_SALT_BYTES = 16
+// scrypt needs about 128 * N * r bytes (32 MiB here). That exceeds Node's 32 MiB
+// default maxmem once OpenSSL's bookkeeping is added, so scrypt would throw.
+const SCRYPT_MAXMEM = 64 * 1024 * 1024
+
+// Legacy format: scrypt$<hex salt>$<64 hex chars>. The hex text itself was the
+// salt, with Node's defaults (N=16384, r=8, p=1) and a 32-byte key.
+const LEGACY_SCRYPT_PARAMS: ScryptParams = { N: 2 ** 14, r: 8, p: 1 }
+
+const PARAMS_PATTERN = /^N=(\d{1,8}),r=(\d{1,3}),p=(\d{1,3})$/
+const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/
+
+interface ParsedPasswordHash {
+  params: ScryptParams
+  salt: Buffer | string
+  key: Buffer
+  legacy: boolean
+}
 
 export function normalizeEmail(value: string): string | null {
   const email = value.trim().toLowerCase()
@@ -12,27 +42,147 @@ export function normalizeEmail(value: string): string | null {
 }
 
 export function validateHumanPassword(value: string): string | null {
-  if (value.length < 12) return 'Password must contain at least 12 characters'
-  if (value.length > 128) return 'Password must contain at most 128 characters'
+  if (value.length < MIN_HUMAN_PASSWORD_LENGTH) {
+    return `Password must contain at least ${MIN_HUMAN_PASSWORD_LENGTH} characters`
+  }
+  if (value.length > MAX_HUMAN_PASSWORD_LENGTH) {
+    return `Password must contain at most ${MAX_HUMAN_PASSWORD_LENGTH} characters`
+  }
   return null
+}
+
+function deriveKey(
+  password: string,
+  salt: Buffer | string,
+  keyLength: number,
+  params: ScryptParams,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(
+      password,
+      salt,
+      keyLength,
+      { N: params.N, r: params.r, p: params.p, maxmem: SCRYPT_MAXMEM },
+      (error, derived) => (error ? reject(error) : resolve(derived)),
+    )
+  })
+}
+
+function formatPasswordHash(params: ScryptParams, salt: Buffer, key: Buffer): string {
+  return `scrypt$N=${params.N},r=${params.r},p=${params.p}$${salt.toString('base64')}$${key.toString('base64')}`
+}
+
+// Memory OpenSSL reserves for a derivation (its maxmem check): 128 * r bytes
+// per block, N + 2 blocks for V plus p blocks for B.
+function scryptMemoryBytes({ N, r, p }: ScryptParams): number {
+  return 128 * r * (N + 2 + p)
+}
+
+function isSupportedParams(params: ScryptParams): boolean {
+  const { N, r, p } = params
+  // N must be a power of two; the bounds keep a corrupted row from asking for
+  // an unbounded amount of work, and the memory budget is the one deriveKey
+  // runs with, so an accepted hash can always be verified.
+  return N >= 2 && N <= 2 ** 20 && (N & (N - 1)) === 0 && r >= 1 && r <= 32 && p >= 1 && p <= 16 &&
+    scryptMemoryBytes(params) <= SCRYPT_MAXMEM
+}
+
+// Raising SCRYPT_PARAMS without raising SCRYPT_MAXMEM would make every new
+// hash unverifiable: fail at startup instead of locking accounts out.
+if (!isSupportedParams(SCRYPT_PARAMS) || !isSupportedParams(LEGACY_SCRYPT_PARAMS)) {
+  throw new Error('SCRYPT_PARAMS exceed the SCRYPT_MAXMEM budget')
+}
+
+function parsePasswordHash(stored: string): ParsedPasswordHash | null {
+  const parts = stored.split('$')
+  if (parts[0] !== 'scrypt') return null
+
+  if (parts.length === 3) {
+    const [, salt, keyHex] = parts
+    if (!salt || !keyHex || !/^[a-f0-9]{64}$/.test(keyHex)) return null
+    return { params: LEGACY_SCRYPT_PARAMS, salt, key: Buffer.from(keyHex, 'hex'), legacy: true }
+  }
+
+  if (parts.length !== 4) return null
+  const [, paramText, saltText, keyText] = parts
+  const match = PARAMS_PATTERN.exec(paramText ?? '')
+  if (!match || !saltText || !keyText || !BASE64_PATTERN.test(saltText) || !BASE64_PATTERN.test(keyText)) {
+    return null
+  }
+  const params = { N: Number(match[1]), r: Number(match[2]), p: Number(match[3]) }
+  const salt = Buffer.from(saltText, 'base64')
+  const key = Buffer.from(keyText, 'base64')
+  if (!isSupportedParams(params) || salt.length === 0 || key.length < 16 || key.length > 128) {
+    return null
+  }
+  return { params, salt, key, legacy: false }
 }
 
 export async function hashHumanPassword(password: string): Promise<string> {
   const validationError = validateHumanPassword(password)
   if (validationError) throw new Error(validationError)
-  const salt = crypto.randomBytes(16).toString('hex')
-  const derived = await scryptAsync(password, salt, SCRYPT_KEY_LENGTH) as Buffer
-  return `scrypt$${salt}$${derived.toString('hex')}`
+  const salt = crypto.randomBytes(SCRYPT_SALT_BYTES)
+  const key = await deriveKey(password, salt, SCRYPT_KEY_LENGTH, SCRYPT_PARAMS)
+  return formatPasswordHash(SCRYPT_PARAMS, salt, key)
+}
+
+/**
+ * Hash in the current format that matches no password. Verifying against it
+ * costs the same as a real account, so unknown emails are not faster to reject.
+ */
+export const DUMMY_PASSWORD_HASH = formatPasswordHash(
+  SCRYPT_PARAMS,
+  Buffer.alloc(SCRYPT_SALT_BYTES),
+  Buffer.alloc(SCRYPT_KEY_LENGTH),
+)
+
+// While legacy hashes (N=2^14) are still being upgraded, verification of a
+// legacy hash is cheaper than of a current one or of the dummy used for
+// unknown emails, which would let response times reveal which accounts exist.
+// Every verification therefore also runs the derivation of the other format,
+// in parallel, so all paths cost the same. Remove once no legacy hash remains.
+const PAD_LEGACY_TIMING = true
+
+async function timingPad(legacy: boolean, password: string): Promise<void> {
+  if (!PAD_LEGACY_TIMING) return
+  const params = legacy ? SCRYPT_PARAMS : LEGACY_SCRYPT_PARAMS
+  const keyLength = legacy ? SCRYPT_KEY_LENGTH : 32
+  await deriveKey(password, Buffer.alloc(SCRYPT_SALT_BYTES), keyLength, params).catch(() => undefined)
 }
 
 export async function verifyHumanPassword(password: string, stored: string): Promise<boolean> {
-  const [algorithm, salt, expectedHex] = stored.split('$')
-  if (algorithm !== 'scrypt' || !salt || !expectedHex || !/^[a-f0-9]{64}$/.test(expectedHex)) {
+  if (password.length > MAX_HUMAN_PASSWORD_LENGTH) return false
+  const parsed = parsePasswordHash(stored)
+  if (!parsed) return false
+
+  let derived: Buffer
+  try {
+    ;[derived] = await Promise.all([
+      deriveKey(password, parsed.salt, parsed.key.length, parsed.params),
+      timingPad(parsed.legacy, password),
+    ])
+  } catch {
     return false
   }
-  const derived = await scryptAsync(password, salt, SCRYPT_KEY_LENGTH) as Buffer
-  const expected = Buffer.from(expectedHex, 'hex')
-  return derived.length === expected.length && crypto.timingSafeEqual(derived, expected)
+  return derived.length === parsed.key.length && crypto.timingSafeEqual(derived, parsed.key)
+}
+
+/**
+ * True when a stored hash uses the legacy format or weaker parameters than
+ * hashHumanPassword() produces today. Call it only after a successful
+ * verification, then store a fresh hash of the same password.
+ */
+export function needsRehash(stored: string): boolean {
+  const parsed = parsePasswordHash(stored)
+  if (!parsed || parsed.legacy) return true
+  const { params, salt, key } = parsed
+  return (
+    params.N < SCRYPT_PARAMS.N ||
+    params.r < SCRYPT_PARAMS.r ||
+    params.p < SCRYPT_PARAMS.p ||
+    salt.length < SCRYPT_SALT_BYTES ||
+    key.length < SCRYPT_KEY_LENGTH
+  )
 }
 
 export function createInvitationCredential(nowMs = Date.now()): {

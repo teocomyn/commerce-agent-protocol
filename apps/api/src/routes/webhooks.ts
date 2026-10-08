@@ -3,9 +3,10 @@ import { Hono } from 'hono'
 import { prisma, type Prisma } from '@cap/db'
 import { verifyShopifyWebhook } from '../lib/shopify.js'
 import { catalogSyncQueue, enrichmentQueue } from '../lib/queue.js'
-import { invalidateMerchantSearchCache, redis } from '../lib/redis.js'
+import { invalidateApiKeyCache, invalidateMerchantSearchCache, purgeMerchantSearchCache } from '../lib/redis.js'
 import { extractCheckoutTrackingToken } from '../lib/webhook-utils.js'
 import { applyInventoryLevelUpdate } from '../lib/inventory.js'
+import { countCustomerOrderReferences, redactCustomerOrders, redactShop } from '../lib/retention.js'
 
 const webhookRouter = new Hono()
 
@@ -43,11 +44,14 @@ webhookRouter.post('/shopify', async (c) => {
   if (!event.claimed) return c.json({ received: true, duplicate: true }, 200)
 
   try {
-    await processWebhook({ topic, shopDomain, merchantId: merchant.id, webhookId, payload })
-    await prisma.webhookEvent.update({
-      where: { id: event.id },
-      data: { status: 'completed', processedAt: new Date(), error: null },
-    })
+    const outcome = await processWebhook({ topic, shopDomain, merchantId: merchant.id, webhookId, payload })
+    // shop/redact deletes the merchant, and its webhook_events rows with it.
+    if (!outcome.merchantDeleted) {
+      await prisma.webhookEvent.update({
+        where: { id: event.id },
+        data: { status: 'completed', processedAt: new Date(), error: null },
+      })
+    }
     return c.json({ received: true }, 200)
   } catch (error) {
     await prisma.webhookEvent.update({
@@ -99,7 +103,7 @@ async function processWebhook(args: {
   merchantId: string
   webhookId: string
   payload: Record<string, unknown>
-}): Promise<void> {
+}): Promise<{ merchantDeleted?: boolean }> {
   const { topic, shopDomain, merchantId, webhookId, payload } = args
   const productId = String(payload['id'] ?? '')
 
@@ -192,14 +196,24 @@ async function processWebhook(args: {
         where: { merchantId, revokedAt: null },
         select: { keyHash: true },
       })
+      const now = new Date()
       await prisma.$transaction([
         prisma.apiKey.updateMany({
           where: { merchantId, revokedAt: null },
-          data: { revokedAt: new Date() },
+          data: { revokedAt: now },
         }),
         prisma.merchantMember.updateMany({
           where: { merchantId, revokedAt: null },
-          data: { revokedAt: new Date() },
+          data: { revokedAt: now, sessionVersion: { increment: 1 } },
+        }),
+        // Otherwise a reinstall would make old invitation links valid again.
+        prisma.merchantInvitation.updateMany({
+          where: { merchantId, acceptedAt: null, revokedAt: null },
+          data: { revokedAt: now },
+        }),
+        prisma.dashboardLoginToken.updateMany({
+          where: { merchantId, consumedAt: null },
+          data: { consumedAt: now },
         }),
         prisma.merchant.update({
           where: { id: merchantId },
@@ -220,13 +234,55 @@ async function processWebhook(args: {
         })}::jsonb
         WHERE id = ${merchantId}::uuid
       `
-      if (keys.length > 0) {
-        await redis.del(...keys.flatMap((key) => [`apikey:${key.keyHash}`, `rl:${key.keyHash}`]))
-      }
+      await invalidateApiKeyCache(keys.map((key) => key.keyHash))
       await invalidateMerchantSearchCache(merchantId)
       break
     }
+
+    // Mandatory GDPR compliance topics (configured in the Shopify app, not
+    // registered through the API).
+    case 'customers/data_request': {
+      // CAP keeps no customer profile; what it holds for a customer is the
+      // Shopify order id on agent checkouts. The count is logged so the store
+      // owner's request can be answered from the logs and the webhook receipt.
+      const orderIds = Array.isArray(payload['orders_requested'])
+        ? (payload['orders_requested'] as unknown[]).map(String)
+        : []
+      const ordersReferenced = await countCustomerOrderReferences(merchantId, orderIds)
+      console.log(
+        `[Webhook] ${shopDomain} customers/data_request: ${ordersReferenced} of ${orderIds.length} requested order(s) referenced by agent checkouts (order id only)`,
+      )
+      break
+    }
+
+    case 'customers/redact': {
+      const orderIds = Array.isArray(payload['orders_to_redact'])
+        ? (payload['orders_to_redact'] as unknown[]).map(String)
+        : []
+      await redactCustomerOrders(merchantId, orderIds)
+      break
+    }
+
+    case 'shop/redact': {
+      const result = await redactShop(merchantId)
+      if (!result.erased) {
+        // Shopify only sends shop/redact 48 h after an uninstall, so the
+        // app/uninstalled webhook was missed or not processed yet. Failing
+        // keeps a durable failed event and makes Shopify redeliver, instead
+        // of silently skipping the erasure.
+        throw new Error(`shop/redact received for ${shopDomain}, which is not marked uninstalled`)
+      }
+      await invalidateApiKeyCache(result.apiKeyHashes)
+        .catch((error: unknown) => console.error('[Webhook] API key cache eviction failed:', error))
+      // Erasure: delete the cached catalog responses, not just hide them.
+      await purgeMerchantSearchCache(merchantId).catch(async (error: unknown) => {
+        console.error('[Webhook] Search cache purge failed, entries expire within 120 s:', error)
+        await invalidateMerchantSearchCache(merchantId)
+      })
+      return { merchantDeleted: true }
+    }
   }
+  return {}
 }
 
 async function reconcileAgentCheckout(

@@ -1,6 +1,20 @@
 import Link from 'next/link'
-import { prisma } from '@cap/db'
+import { type Prisma, prisma } from '@cap/db'
 import { getDashboardMerchant } from '@/lib/merchant-context'
+import { parsePageParam } from '@/lib/pagination'
+
+const SORT_ORDERS = {
+  geo_asc: { geoScore: 'asc' },
+  geo_desc: { geoScore: 'desc' },
+  newest: { enrichedAt: 'desc' },
+} satisfies Record<string, Prisma.ProductEnrichedOrderByWithRelationInput>
+
+type SortKey = keyof typeof SORT_ORDERS
+
+// Own keys only: `?sort=__proto__` must not reach Prisma as an orderBy.
+function isSortKey(value: unknown): value is SortKey {
+  return typeof value === 'string' && Object.hasOwn(SORT_ORDERS, value)
+}
 
 function GeoBar({ score }: { score: number }) {
   const color = score >= 70 ? '#22c55e' : score >= 40 ? '#f59e0b' : '#ef4444'
@@ -19,10 +33,11 @@ function GeoBar({ score }: { score: number }) {
 export default async function ProductsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; sort?: string }>
+  searchParams: Promise<{ page?: string | string[]; sort?: string | string[] }>
 }) {
-  const { page: pageParam = '1', sort = 'geo_asc' } = await searchParams
-  const page = Math.max(1, parseInt(pageParam))
+  const { page: pageParam, sort: sortParam } = await searchParams
+  const page = parsePageParam(pageParam)
+  const sort: SortKey = isSortKey(sortParam) ? sortParam : 'geo_asc'
   const pageSize = 20
   const offset = (page - 1) * pageSize
 
@@ -31,16 +46,10 @@ export default async function ProductsPage({
     merchantId: merchant?.id ?? '00000000-0000-0000-0000-000000000000',
   }
 
-  const orderByMap: Record<string, object> = {
-    geo_asc: { geoScore: 'asc' },
-    geo_desc: { geoScore: 'desc' },
-    newest: { enrichedAt: 'desc' },
-  }
-
   const [products, total] = await Promise.all([
     prisma.productEnriched.findMany({
       where: { deletedAt: null, ...storeScope },
-      orderBy: orderByMap[sort] ?? { geoScore: 'asc' },
+      orderBy: SORT_ORDERS[sort],
       take: pageSize,
       skip: offset,
       include: {

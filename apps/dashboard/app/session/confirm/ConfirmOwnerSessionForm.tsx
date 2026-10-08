@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { type FormEvent, useState, useTransition } from 'react'
+import { NETWORK_ERROR_MESSAGE } from '@/lib/response-error'
 
 export default function ConfirmOwnerSessionForm({ merchantId }: { merchantId: string }) {
   const router = useRouter()
@@ -22,7 +23,7 @@ export default function ConfirmOwnerSessionForm({ merchantId }: { merchantId: st
           body: JSON.stringify({ merchantId }),
         })
       } catch {
-        setError('Network error. Check your connection and try again.')
+        setError(NETWORK_ERROR_MESSAGE)
         return
       }
       const data = await response.json().catch(() => ({})) as { error?: string; redirect?: string }

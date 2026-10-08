@@ -72,7 +72,8 @@ services:
     branch: main
     dockerfilePath: ./Dockerfile.api
     dockerContext: .
-    dockerCommand: pnpm --filter @cap/api start:worker:catalog
+    dockerCommand: node apps/api/dist/apps/api/src/workers/catalog-sync.worker.js
+    preDeployCommand: pnpm db:migrate
     autoDeployTrigger: off
     maxShutdownDelaySeconds: 120
     envVars: &staging-worker-env
@@ -131,7 +132,8 @@ services:
     branch: main
     dockerfilePath: ./Dockerfile.api
     dockerContext: .
-    dockerCommand: pnpm --filter @cap/api start:worker:enrichment
+    dockerCommand: node apps/api/dist/apps/api/src/workers/enrichment.worker.js
+    preDeployCommand: pnpm db:migrate
     autoDeployTrigger: off
     maxShutdownDelaySeconds: 120
     envVars: *staging-worker-env
@@ -144,6 +146,7 @@ services:
     branch: main
     dockerfilePath: ./Dockerfile.dashboard
     dockerContext: .
+    preDeployCommand: pnpm db:migrate
     autoDeployTrigger: off
     healthCheckPath: /
     domains:

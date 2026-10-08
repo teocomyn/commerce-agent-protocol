@@ -1,6 +1,6 @@
 # Dashboard authentication and team access
 
-CAP uses signed, HTTP-only dashboard sessions backed by live merchant membership checks. A session is bound to one user, one merchant, and one role. Every protected dashboard page and server mutation verifies that the membership still exists, has not been revoked, and still has the role recorded in the session.
+CAP uses signed, HTTP-only dashboard sessions backed by live merchant membership checks. A session is bound to one user, one merchant, and one role. Every protected dashboard page and server mutation verifies that the membership still exists, has not been revoked, still has the role recorded in the session, and has not been modified since the session was issued.
 
 ## Access flows
 
@@ -20,7 +20,7 @@ Because that redirect is cross-site, the dashboard cannot tell it apart from a l
 2. The owner chooses `ADMIN` or `ANALYST` and creates an invitation.
 3. CAP displays the invitation URL once. The owner shares it through a trusted private channel.
 4. The invitee opens the URL:
-   - **New email:** the invitee supplies a name and a password of at least 12 characters, and receives a signed session.
+   - **New email:** the invitee supplies a name and a password of 12 to 256 characters, and receives a signed session.
    - **Email that already has a CAP password:** the invitee first signs in at `/login` with that account, then reopens the link and clicks **Accept invitation**. No password is entered on the invitation page. A browser signed in with a different account is offered a sign-out first, because `/login` sends signed-in browsers straight to the dashboard.
 5. Future sign-ins use the invitee's email, password, and the merchant's canonical `*.myshopify.com` domain at `/login`.
 
@@ -45,11 +45,31 @@ An existing account that has a password but no active membership cannot sign in,
 
 Role changes and membership revocations invalidate existing sessions immediately because membership is checked in PostgreSQL on every authenticated server request.
 
+## Session revocation
+
+Each session payload carries `mv`, the membership version: `merchant_members.session_version` when the session was issued. On every authenticated request the dashboard reloads the membership and rejects the session when the membership is revoked, its role differs, or its `session_version` no longer equals `mv` (`isSessionMembershipCurrent` in `apps/dashboard/lib/dashboard-session.ts`). The counter is incremented atomically, so unlike a timestamp it cannot repeat across clocks or fast writes.
+
+These changes increment it and sign out every session issued before them for that member and merchant, including on other devices:
+
+- an owner changes the member's role or revokes the member;
+- a revoked member is invited again and accepts;
+- an owner who was revoked or demoted is reinstated by a Shopify reinstall, and uninstalling revokes every membership.
+
+A routine Shopify OAuth re-authorization of an active owner (for example after a scope change) does not touch the membership, so it does not sign the owner out.
+
+Cookies issued before membership versioning carry no `mv` and are rejected. After this change is deployed every signed-in user must sign in once more: team members at `/login`, owners through the Shopify connection flow.
+
 ## Security properties
 
-- Passwords are hashed with Node.js `scrypt`, a random per-password salt, and timing-safe verification.
-- Login errors do not reveal whether an email, merchant, or password was wrong.
-- Login attempts are limited in Redis per client address, email, and merchant domain.
+- Passwords are hashed with Node.js `scrypt` (N=2^15, r=8, p=1, `maxmem` 64 MiB), a random 16-byte salt and a 64-byte key, and verified in constant time. The stored format records its parameters: `scrypt$N=32768,r=8,p=1$<salt base64>$<key base64>`.
+- Hashes in the earlier format (`scrypt$<hex salt>$<hex key>`, Node's default N=16384 and a 32-byte key) still verify. A successful sign-in with such a hash, or with weaker parameters than the current ones, re-hashes the password in the current format (rehash-on-login). The update only applies if the stored hash is unchanged, and a failed upgrade never blocks the sign-in.
+- Passwords must contain 12 to 256 characters. The login route rejects longer passwords with `400` before any hashing work.
+- Login errors do not reveal whether an email, merchant, or password was wrong. Unknown accounts are checked against a dummy hash in the current format, so they take as long as accounts whose hash is current.
+- Login attempts are limited in Redis over 15-minute windows in two independent buckets, and an attempt is rejected with `429` and `Retry-After` (the longer of the two waits) when either is exhausted:
+  - **per account:** 10 attempts per email and merchant domain (`sha256(email:shop)`), whatever the client address. A successful sign-in resets only this bucket;
+  - **per client address:** 50 attempts across all accounts. The address is the rightmost `X-Forwarded-For` entry, the one appended by Render's proxy (clients can only prepend values). The per-account bucket does not depend on it.
+
+  The per-account limit also means repeated failures, including someone else's guesses, can lock an account out of password sign-in for up to 15 minutes.
 - Session cookies are HTTP-only, `SameSite=Lax`, secure in production, and expire after eight hours.
 - Mutating routes enforce same-origin requests (full origin: scheme, host and port, against `DASHBOARD_URL` in production) and merchant scoping on the server.
 - Invitation pages, the owner sign-in confirmation page, and `GET /api/session/merchant` use a no-referrer policy to avoid leaking tokens through navigation headers.

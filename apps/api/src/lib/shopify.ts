@@ -2,12 +2,28 @@ import crypto from 'node:crypto'
 import { decodeCanonicalKey } from './secrets.js'
 
 export const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION ?? '2026-07'
-const SHOPIFY_TIMEOUT_MS = Number(process.env.SHOPIFY_TIMEOUT_MS ?? 10_000)
+const DEFAULT_SHOPIFY_TIMEOUT_MS = 10_000
+const configuredTimeout = Number(process.env.SHOPIFY_TIMEOUT_MS ?? DEFAULT_SHOPIFY_TIMEOUT_MS)
+// An invalid value would make every request throw and SHOPIFY_MAX_CALL_MS NaN
+// (an idempotency lease that never expires): fall back to the default.
+const SHOPIFY_TIMEOUT_MS = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+  ? configuredTimeout
+  : DEFAULT_SHOPIFY_TIMEOUT_MS
+if (SHOPIFY_TIMEOUT_MS !== configuredTimeout) {
+  console.warn(`[Shopify] Ignoring invalid SHOPIFY_TIMEOUT_MS=${process.env.SHOPIFY_TIMEOUT_MS}; using ${DEFAULT_SHOPIFY_TIMEOUT_MS} ms`)
+}
+const SHOPIFY_ATTEMPTS = 3
+// Retry-After is honoured up to this bound, so one Shopify call has a hard
+// upper duration that callers (checkout idempotency) can rely on.
+const MAX_RETRY_DELAY_MS = 5_000
+
+/** Longest a single Shopify call can take, retries included. */
+export const SHOPIFY_MAX_CALL_MS = SHOPIFY_ATTEMPTS * SHOPIFY_TIMEOUT_MS + (SHOPIFY_ATTEMPTS - 1) * MAX_RETRY_DELAY_MS
 
 async function fetchWithRetry(
   input: string,
   init: RequestInit,
-  attempts = 3,
+  attempts = SHOPIFY_ATTEMPTS,
 ): Promise<Response> {
   let lastError: unknown
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -19,7 +35,8 @@ async function fetchWithRetry(
       if (response.status !== 429 && response.status < 500) return response
       if (attempt === attempts) return response
       const retryAfter = Number(response.headers.get('retry-after') ?? 0)
-      await new Promise((resolve) => setTimeout(resolve, retryAfter > 0 ? retryAfter * 1_000 : attempt * 500))
+      const delay = retryAfter > 0 ? Math.min(retryAfter * 1_000, MAX_RETRY_DELAY_MS) : attempt * 500
+      await new Promise((resolve) => setTimeout(resolve, delay))
     } catch (error) {
       lastError = error
       if (attempt === attempts) throw error
