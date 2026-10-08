@@ -19,7 +19,14 @@ const prisma = vi.hoisted(() => ({
 }))
 
 vi.mock('@cap/db', () => ({ prisma }))
-vi.mock('@/lib/redis', () => ({ invalidateApiKeyCache: vi.fn(async () => undefined) }))
+// Every export of lib/redis, so no route under test can reach a real Redis.
+vi.mock('@/lib/redis', () => ({
+  dashboardRedis: {},
+  invalidateApiKeyCache: vi.fn(async () => undefined),
+  consumeDashboardLoginAttempt: vi.fn(async () => ({ allowed: true, retryAfterSeconds: 0 })),
+  consumeDashboardInvitationAttempt: vi.fn(async () => ({ allowed: true, retryAfterSeconds: 0 })),
+  clearDashboardLoginAttempts: vi.fn(async () => undefined),
+}))
 vi.mock('@/lib/dashboard-session', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/dashboard-session')>(),
   getDashboardSession: vi.fn(async () => state.session),
