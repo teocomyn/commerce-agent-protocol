@@ -57,6 +57,14 @@ Branch: `chore/p2-reliability` = PR #35 (→ `main`, contains all of PR #34). P0
 - Email verification for invitations and an error-tracking vendor need product/billing decisions.
 - Strategic positioning vs UCP/ACP (P1).
 
+## P4 platform branch (`chore/p4-platform`, stacked on PR #35)
+
+- Docker images: two-stage builds, runtime holds production dependencies only and runs as `node`; base pinned by version and digest (API 1.56 GB → 529 MB, dashboard 1.64 GB → 725 MB). Verified locally: migrations as `node`, API `/ready`, worker drain on SIGTERM, dashboard pages with Prisma.
+- CI: runs on every PR (stacked ones too), actions pinned by SHA, job timeouts, `/ready` + `/openapi.json` smoke test, Docker image build job that checks the image is non-root; Dependabot watches the Docker base image.
+- Migration `20261008160000_foreign_key_indexes`: indexes on the 7 foreign keys that had none.
+- Dashboard route tests: auth, roles, origin and merchant scoping on every API route.
+- Site: no button inside a link, canonical URL, particles and globe lazy-loaded and still under reduced motion (first-load JS 200 kB → 154 kB).
+
 ## Next concrete action
 
 - The user merges PR #34 (`chore/p0-hardening`), then PR #35 (`chore/p2-reliability`). The agent's auto-mode guard blocks `gh pr merge`.

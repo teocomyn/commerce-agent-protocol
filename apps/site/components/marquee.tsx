@@ -1,4 +1,4 @@
-import { Sparkles } from './ui/sparkles'
+import { LazySparkles } from './ui/lazy-visuals'
 
 // Plain-text wordmarks for the interfaces and platform the v0.1 reference
 // implementation supports today. They describe compatibility only: no
@@ -76,7 +76,7 @@ export function Marquee() {
         <div
           className="absolute -left-1/2 top-1/2 aspect-[1/0.7] z-10 w-[200%] rounded-[100%] border-t border-accent/20 bg-void"
         />
-        <Sparkles
+        <LazySparkles
           density={1200}
           color="#38D6FF"
           className="absolute inset-x-0 bottom-0 h-full w-full [mask-image:radial-gradient(50%_50%,white,transparent_85%)]"

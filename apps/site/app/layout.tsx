@@ -5,6 +5,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://cap-protocol.org'),
+  alternates: { canonical: '/' },
   title: {
     default: 'CAP — Commerce Agent Protocol',
     template: '%s — CAP',

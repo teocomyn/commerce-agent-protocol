@@ -84,6 +84,7 @@ model MerchantInvitation {
 
   @@index([merchantId, email])
   @@index([expiresAt])
+  @@index([invitedByUserId])
   @@map("merchant_invitations")
 }
 
@@ -120,6 +121,8 @@ model DashboardLoginToken {
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
+  @@index([userId])
+  @@index([merchantId])
   @@map("dashboard_login_tokens")
 }
 
@@ -232,6 +235,7 @@ model ApiKey {
 
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
 
+  @@index([merchantId])
   @@map("api_keys")
 }
 
@@ -258,6 +262,7 @@ model AgentQuery {
   @@index([createdAt], name: "idx_agent_queries_created")
   @@index([agentType], name: "idx_agent_queries_type")
   @@index([merchantId], name: "idx_agent_queries_merchant")
+  @@index([selectedProduct])
   @@map("agent_queries")
 }
 
@@ -286,5 +291,7 @@ model AgentCheckout {
 
   @@unique([merchantId, idempotencyKey])
   @@index([merchantId, createdAt])
+  @@index([agentQueryId])
+  @@index([productId])
   @@map("agent_checkouts")
 }

@@ -1,5 +1,5 @@
 import { SectionHead } from './section-head'
-import { GlobeCdn } from './ui/cobe-globe-cdn'
+import { LazyGlobe } from './ui/lazy-visuals'
 
 export function GlobeSection() {
   return (
@@ -32,7 +32,7 @@ export function GlobeSection() {
             }}
           />
           {/* Drag-able interactive globe */}
-          <GlobeCdn className="w-full max-w-[560px] mx-auto" />
+          <LazyGlobe className="w-full max-w-[560px] mx-auto" />
 
           {/* Drag hint */}
           <p className="mt-6 text-center font-mono text-[11px] uppercase tracking-widest text-subtle">
