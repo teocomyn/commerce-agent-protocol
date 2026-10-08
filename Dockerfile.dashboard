@@ -1,14 +1,22 @@
-FROM node:22-alpine
+# syntax=docker/dockerfile:1
 
+# Exact version and multi-arch digest: builds are reproducible, and Dependabot
+# (docker ecosystem) proposes the updates.
+FROM node:22.23.3-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-ENV DATABASE_URL=postgresql://build:build@localhost:5432/build
-
-RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
-RUN apk add --no-cache openssl
-
+# No Prisma update checks from build or deploy machines.
+ENV CHECKPOINT_DISABLE=1
+ENV NEXT_TELEMETRY_DISABLED=1
+# pnpm is installed globally (not through corepack's per-user cache) so the
+# unprivileged runtime user can run Render's `pnpm db:migrate` pre-deploy step.
+RUN npm install --global pnpm@9.0.0 && npm cache clean --force && apk add --no-cache openssl
 WORKDIR /app
 
+# ---- Build: full install and compilation ----
+FROM base AS build
+ENV DATABASE_URL=postgresql://build:build@localhost:5432/build
+# Every workspace manifest: the frozen lockfile covers all of them.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/dashboard/package.json apps/dashboard/package.json
@@ -16,18 +24,37 @@ COPY apps/site/package.json apps/site/package.json
 COPY packages/db/package.json packages/db/package.json
 COPY packages/shared/package.json packages/shared/package.json
 RUN pnpm install --frozen-lockfile
-
 COPY . .
-
 # NEXT_PUBLIC_* values are inlined into the client bundle at build time. Render
 # passes service environment variables as build args, so declare it here and
 # fail the build instead of shipping a bundle that points at localhost.
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN node apps/dashboard/scripts/check-public-api-url.mjs
-RUN pnpm --filter @cap/dashboard... build
+RUN pnpm --filter @cap/dashboard... build && rm -rf apps/dashboard/.next/cache
 
+# ---- Runtime: production dependencies and compiled output only ----
+FROM base AS runtime
 ENV NODE_ENV=production
+# Only the manifests of the dashboard and its workspace packages: pnpm ignores
+# --filter on a frozen install, but links nothing for absent manifests. The
+# store is removed in the same layer (node_modules keeps the files).
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/dashboard/package.json apps/dashboard/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/shared/package.json packages/shared/package.json
+# --no-optional: the SWC compilers and sharp are build or next/image tools;
+# `next start` serves the compiled .next output without them.
+RUN pnpm install --frozen-lockfile --prod --no-optional && rm -rf "$(pnpm store path)"
+COPY --from=build /app/packages/db/prisma packages/db/prisma
+COPY --from=build /app/packages/db/dist packages/db/dist
+COPY --from=build /app/packages/shared/dist packages/shared/dist
+COPY --from=build /app/apps/dashboard/next.config.mjs apps/dashboard/next.config.mjs
+# Next.js writes its runtime cache under .next: owned by the runtime user.
+COPY --from=build --chown=node:node /app/apps/dashboard/.next apps/dashboard/.next
+RUN pnpm --filter @cap/db exec prisma generate
+
+USER node
 EXPOSE 3001
 
 # exec keeps Next.js as PID 1 so it receives SIGTERM and drains on deploys

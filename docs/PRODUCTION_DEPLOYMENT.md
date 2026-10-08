@@ -25,7 +25,9 @@ To rotate the encryption key (or to move an older string-format key to the requi
    - a decryption error: neither key can read a token, so it is unusable anyway. Reinstall the app on that shop, which stores fresh tokens. For a shop that no longer uses CAP, uninstall the app from its Shopify admin instead: the `app/uninstalled` webhook clears the tokens, revokes its API keys and dashboard access, and evicts cached keys. Then run the script again.
 6. Remove `ENCRYPTION_KEY_PREVIOUS` from all three services once the script reports zero failures.
 
-The dashboard image needs `NEXT_PUBLIC_API_URL` at build time: Render passes service environment variables as Docker build args, and `Dockerfile.dashboard` fails the build if it is missing.
+The dashboard image needs `NEXT_PUBLIC_API_URL` at build time: Render passes service environment variables as Docker build args, and `Dockerfile.dashboard` fails the build unless it is the public https URL of the API.
+
+Both images use multi-stage builds (a shared base, a build stage and a runtime stage). The runtime stage holds the app's production dependencies and compiled output, plus pnpm and OpenSSL (needed by Prisma and by the `pnpm db:migrate` pre-deploy command), and runs everything as the unprivileged `node` user. The base image is pinned by exact version and digest; Dependabot proposes updates weekly. CI builds both images on every pull request and checks that they do not run as root.
 
 The API pre-deploy hook runs `prisma migrate deploy`; the initial migration enables `vector`. Render Postgres 16 supports pgvector. Deploys are gated on successful GitHub checks.
 

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import createGlobe from 'cobe'
 import { cn } from '@/lib/utils'
+import { usePrefersReducedMotion } from '@/lib/use-reduced-motion'
 
 interface CapMarker {
   id: string
@@ -63,6 +64,12 @@ export function GlobeCdn({
   const phiOffsetRef = useRef(0)
   const thetaOffsetRef = useRef(0)
   const isPausedRef = useRef(false)
+  // Reduced motion: no automatic rotation; dragging still works. Read through
+  // a ref so the preference (resolved after mount) freezes the running globe
+  // instead of destroying and recreating it.
+  const reducedMotion = usePrefersReducedMotion()
+  const rotationSpeedRef = useRef(speed)
+  rotationSpeedRef.current = reducedMotion ? 0 : speed
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     pointerInteracting.current = { x: e.clientX, y: e.clientY }
@@ -134,7 +141,7 @@ export function GlobeCdn({
         arcHeight: 0.32,
         opacity: 0.85,
         onRender: (state: Record<string, number>) => {
-          if (!isPausedRef.current) phi += speed
+          if (!isPausedRef.current) phi += rotationSpeedRef.current
           state['phi'] = phi + phiOffsetRef.current + dragOffset.current.phi
           state['theta'] = 0.25 + thetaOffsetRef.current + dragOffset.current.theta
           state['width'] = width * 2
@@ -165,7 +172,7 @@ export function GlobeCdn({
       if (animationId) cancelAnimationFrame(animationId)
       if (globe) globe.destroy()
     }
-  }, [markers, arcs, speed])
+  }, [markers, arcs])
 
   return (
     <div className={cn('relative aspect-square select-none', className)}>

@@ -1,10 +1,10 @@
 name: CI
 
+# Every pull request, including those stacked on another branch.
 on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,6 +17,7 @@ jobs:
   build:
     name: Build & typecheck
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://cap_user:cap_password@127.0.0.1:5432/cap_db
       REDIS_URL: redis://127.0.0.1:6379
@@ -49,13 +50,13 @@ jobs:
           --health-retries 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
           cache: pnpm
@@ -93,6 +94,7 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # /ready, not /health: it fails unless Postgres and Redis answer.
       - name: Smoke test compiled API
         env:
           API_PORT: 3100
@@ -101,12 +103,52 @@ jobs:
           API_PID=$!
           trap 'kill $API_PID 2>/dev/null || true' EXIT
           for attempt in $(seq 1 20); do
-            if curl --fail --silent http://127.0.0.1:3100/health > /tmp/cap-health.json; then
+            if curl --fail --silent http://127.0.0.1:3100/ready > /tmp/cap-ready.json; then
               break
             fi
             sleep 0.5
           done
-          grep -q '"status":"ok"' /tmp/cap-health.json || {
-            cat /tmp/cap-api.log
+          grep -q '"status":"ready"' /tmp/cap-ready.json && curl --fail --silent --output /dev/null http://127.0.0.1:3100/openapi.json || {
+            cat /tmp/cap-ready.json /tmp/cap-api.log 2>/dev/null
             exit 1
           }
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: Dockerfile.api
+            image: cap-api
+          - dockerfile: Dockerfile.dashboard
+            image: cap-dashboard
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Built, not pushed: Render builds the deployed images itself. This
+      # catches Dockerfile and runtime-install regressions before a deploy.
+      - name: Build ${{ matrix.image }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: true
+          tags: ${{ matrix.image }}:ci
+          build-args: NEXT_PUBLIC_API_URL=https://api.cap-protocol.org
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      # The assignment fails the step if the container does not run at all.
+      - name: Runs as an unprivileged user
+        run: |
+          uid="$(docker run --rm ${{ matrix.image }}:ci id -u)"
+          echo "runtime uid: $uid"
+          test -n "$uid" && test "$uid" != "0"

@@ -3,6 +3,7 @@
 import { useEffect, useId, useState } from 'react'
 import Particles, { initParticlesEngine } from '@tsparticles/react'
 import { loadSlim } from '@tsparticles/slim'
+import { usePrefersReducedMotion } from '@/lib/use-reduced-motion'
 
 interface SparklesProps {
   className?: string
@@ -34,6 +35,8 @@ export function Sparkles({
   options = {},
 }: SparklesProps) {
   const [isReady, setIsReady] = useState(false)
+  // Reduced motion: the same field of particles, standing still.
+  const reducedMotion = usePrefersReducedMotion()
 
   useEffect(() => {
     initParticlesEngine(async (engine) => {
@@ -50,7 +53,7 @@ export function Sparkles({
     particles: {
       color: { value: color },
       move: {
-        enable: true,
+        enable: !reducedMotion,
         direction: 'none' as const,
         speed: { min: minSpeed ?? speed / 10, max: speed },
         straight: false,
@@ -58,7 +61,7 @@ export function Sparkles({
       number: { value: density },
       opacity: {
         value: { min: minOpacity ?? opacity / 10, max: opacity },
-        animation: { enable: true, sync: false, speed: opacitySpeed },
+        animation: { enable: !reducedMotion, sync: false, speed: opacitySpeed },
       },
       size: { value: { min: minSize ?? size / 2.5, max: size } },
     },

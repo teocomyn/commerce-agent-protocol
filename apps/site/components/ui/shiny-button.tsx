@@ -23,32 +23,28 @@ export function ShinyButton({
   const padding = size === 'lg' ? '14px 28px' : '10px 22px'
   const fontSize = size === 'lg' ? '15px' : '14px'
 
-  const inner = (
-    <button
-      className={cn('shiny-cta', className)}
-      onClick={onClick}
-      type="button"
-      style={{ padding, fontSize }}
-    >
-      <span>{children}</span>
-    </button>
-  )
+  const style = { padding, fontSize }
+  const content = <span>{children}</span>
 
+  // A link is styled as the button itself: a <button> inside an <a> is
+  // invalid HTML and announced twice by screen readers.
   return (
     <>
       <style>{shinyStyles}</style>
       {href ? (
-        external ? (
-          <a href={href} target="_blank" rel="noreferrer" className="inline-block">
-            {inner}
-          </a>
-        ) : (
-          <a href={href} className="inline-block">
-            {inner}
-          </a>
-        )
+        <a
+          href={href}
+          className={cn('shiny-cta', className)}
+          style={style}
+          onClick={onClick}
+          {...(external && { target: '_blank', rel: 'noreferrer' })}
+        >
+          {content}
+        </a>
       ) : (
-        inner
+        <button className={cn('shiny-cta', className)} onClick={onClick} type="button" style={style}>
+          {content}
+        </button>
       )}
     </>
   )
@@ -73,6 +69,8 @@ const shinyStyles = `
 
     isolation: isolate;
     position: relative;
+    display: inline-block;
+    text-decoration: none;
     overflow: hidden;
     cursor: pointer;
     outline-offset: 4px;
