@@ -5,8 +5,7 @@
       "title": "VEJA Campo Chromefree White",
       "merchant": {
         "name": "veja store",
-        "domain": "veja-store.myshopify.com",
-        "trust_score": 92
+        "domain": "veja-store.myshopify.com"
       },
       "price": { "amount": 110.0, "currency": "EUR" },
       "variants": [

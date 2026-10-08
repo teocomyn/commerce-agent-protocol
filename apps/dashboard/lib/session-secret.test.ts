@@ -1,0 +1,72 @@
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  dashboardSessionSecret,
+  validateDashboardSessionSecret,
+} from './session-secret'
+
+const ORIGINAL_SECRET = process.env.DASHBOARD_SESSION_SECRET
+
+describe('dashboard session secret validation', () => {
+  afterEach(() => {
+    if (ORIGINAL_SECRET === undefined) delete process.env.DASHBOARD_SESSION_SECRET
+    else process.env.DASHBOARD_SESSION_SECRET = ORIGINAL_SECRET
+  })
+
+  it('accepts a random secret of at least 32 characters', () => {
+    const secret = 'a3f1c9e04b7d2a6f8e1c3b5d7f9a0c2e4b6d8f0a1c3e5a7b9d1f3a5c7e9b0d2f'
+    expect(validateDashboardSessionSecret(secret)).toBe(secret)
+  })
+
+  it('applies the length and distinct-character bounds exactly', () => {
+    // 32 characters, exactly 12 distinct ones, no repeated block.
+    const exactly32 = 'abcdefghijklbadcfehgjilkacegikbd'
+    expect(new Set(exactly32).size).toBe(12)
+    expect(validateDashboardSessionSecret(exactly32)).toBe(exactly32)
+    expect(() => validateDashboardSessionSecret(exactly32.slice(0, 31))).toThrow(/32 characters/)
+    // 11 distinct characters, no repeated block.
+    const elevenDistinct = 'abcdefghijkbadcfehgjikacegikbdfh'
+    expect(new Set(elevenDistinct).size).toBe(11)
+    expect(() => validateDashboardSessionSecret(elevenDistinct)).toThrow(/trivially guessable/)
+  })
+
+  it('rejects a short block repeated, whatever its distinct characters', () => {
+    expect(() => validateDashboardSessionSecret('abcdefghijkl'.repeat(3))).toThrow(/repeated pattern/)
+  })
+
+  it('rejects missing and short secrets with a generation hint', () => {
+    expect(() => validateDashboardSessionSecret(undefined)).toThrow(/32 characters/)
+    expect(() => validateDashboardSessionSecret('')).toThrow(/32 characters/)
+    expect(() => validateDashboardSessionSecret('short')).toThrow(/openssl rand -hex 32/)
+  })
+
+  it('rejects the .env.example placeholder', () => {
+    expect(() => validateDashboardSessionSecret('change_me_to_a_random_secret_of_at_least_32_chars'))
+      .toThrow(/placeholder/)
+  })
+
+  it.each([
+    'CHANGE_ME_please_replace_this_value_before_deploying',
+    'prefix-change_me-suffix-0123456789abcdef0123456789',
+    'your_dashboard_session_secret_with_enough_length',
+    'YOUR_SECRET_HERE_0123456789abcdef0123456789abcdef',
+    'replace-with-a-random-dashboard-session-secret-0123',
+  ])('rejects placeholder-looking secret %s', (secret) => {
+    expect(() => validateDashboardSessionSecret(secret)).toThrow(/openssl rand -hex 32/)
+  })
+
+  it.each([
+    'a'.repeat(32),
+    '12345678901234567890123456789012',
+    'f'.repeat(64),
+  ])('rejects trivially guessable secret %s', (secret) => {
+    expect(() => validateDashboardSessionSecret(secret)).toThrow(/trivially guessable/)
+  })
+
+  it('reads the secret from DASHBOARD_SESSION_SECRET', () => {
+    process.env.DASHBOARD_SESSION_SECRET = 'change_me_to_a_random_secret_of_at_least_32_chars'
+    expect(() => dashboardSessionSecret()).toThrow(/placeholder/)
+    const secret = 'a3f1c9e04b7d2a6f8e1c3b5d7f9a0c2e4b6d8f0a1c3e5a7b9d1f3a5c7e9b0d2f'
+    process.env.DASHBOARD_SESSION_SECRET = secret
+    expect(dashboardSessionSecret()).toBe(secret)
+  })
+})

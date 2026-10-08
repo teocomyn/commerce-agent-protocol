@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { decodeCanonicalKey } from './secrets.js'
 
 export const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION ?? '2026-07'
 const SHOPIFY_TIMEOUT_MS = Number(process.env.SHOPIFY_TIMEOUT_MS ?? 10_000)
@@ -811,33 +812,61 @@ export async function createShopifyCart(
 // ============================================================
 
 const ALGORITHM = 'aes-256-gcm'
+const CIPHERTEXT_VERSION = 'v2'
 
-function encryptionKey(): Buffer {
-  const key = Buffer.from(process.env.ENCRYPTION_KEY ?? '', 'utf8')
+// v1 ciphertexts (no prefix) used the first 32 UTF-8 bytes of the key string,
+// which only carries 128 bits of entropy for a hex key. They stay readable.
+function legacyKey(raw: string): Buffer {
+  const key = Buffer.from(raw, 'utf8')
   if (key.length < 32) throw new Error('ENCRYPTION_KEY must contain at least 32 bytes')
   return key.subarray(0, 32)
 }
 
+function deriveKey(raw: string): Buffer {
+  return decodeCanonicalKey(raw) ?? legacyKey(raw)
+}
+
+// ENCRYPTION_KEY_PREVIOUS keeps tokens readable while the key is rotated
+// (see `pnpm --filter @cap/api reencrypt-tokens`). Keys are derived lazily,
+// inside the per-key attempt, so an unusable previous key can never block
+// tokens that the current key decrypts.
+function decryptionKeyCandidates(versioned: boolean): Array<() => Buffer> {
+  return [process.env.ENCRYPTION_KEY ?? '', process.env.ENCRYPTION_KEY_PREVIOUS]
+    .filter((raw, index): raw is string => index === 0 || Boolean(raw))
+    .map((raw) => () => versioned ? deriveKey(raw) : legacyKey(raw))
+}
+
 export function encryptToken(plaintext: string): string {
-  const key = encryptionKey()
-  const iv = crypto.randomBytes(16)
+  const key = deriveKey(process.env.ENCRYPTION_KEY ?? '')
+  const iv = crypto.randomBytes(12)
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv)
   const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
   const tag = cipher.getAuthTag()
-  // Format: iv:tag:encrypted (hex)
-  return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`
+  // Format: v2:iv:tag:encrypted (hex)
+  return `${CIPHERTEXT_VERSION}:${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`
 }
 
 export function decryptToken(ciphertext: string): string {
-  const key = encryptionKey()
-  const [ivHex, tagHex, encryptedHex] = ciphertext.split(':')
-  if (!ivHex || !tagHex || !encryptedHex) throw new Error('Invalid ciphertext format')
+  const parts = ciphertext.split(':')
+  const versioned = parts[0] === CIPHERTEXT_VERSION
+  const [ivHex, tagHex, encryptedHex] = versioned ? parts.slice(1) : parts
+  if (parts.length !== (versioned ? 4 : 3) || !ivHex || !tagHex || !encryptedHex) {
+    throw new Error('Invalid ciphertext format')
+  }
 
   const iv = Buffer.from(ivHex, 'hex')
   const tag = Buffer.from(tagHex, 'hex')
   const encrypted = Buffer.from(encryptedHex, 'hex')
 
-  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv)
-  decipher.setAuthTag(tag)
-  return decipher.update(encrypted).toString('utf8') + decipher.final('utf8')
+  let lastError: unknown
+  for (const candidate of decryptionKeyCandidates(versioned)) {
+    try {
+      const decipher = crypto.createDecipheriv(ALGORITHM, candidate(), iv)
+      decipher.setAuthTag(tag)
+      return decipher.update(encrypted).toString('utf8') + decipher.final('utf8')
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Token decryption failed')
 }

@@ -143,7 +143,7 @@ async function handleCommerceSearch(args: Record<string, unknown>) {
   const embedding = embeddingResponse.data[0]?.embedding ?? []
   const embeddingStr = `[${embedding.join(',')}]`
 
-  const conditions: string[] = ['pe.deleted_at IS NULL']
+  const conditions: string[] = ['pe.deleted_at IS NULL', 'pr.deleted_at IS NULL', "pr.status = 'active'"]
   const params: unknown[] = []
   let paramIdx = 1
 
@@ -281,7 +281,9 @@ async function handleCommerceCompare(args: Record<string, unknown>) {
      JOIN products_raw pr ON pr.id = pe.product_raw_id
      WHERE pe.id = ANY($1::uuid[])
        AND pe.merchant_id = $2::uuid
-       AND pe.deleted_at IS NULL`,
+       AND pe.deleted_at IS NULL
+       AND pr.deleted_at IS NULL
+       AND pr.status = 'active'`,
     productIds,
     merchantId,
   )
@@ -345,8 +347,9 @@ async function handleCommerceCompare(args: Record<string, unknown>) {
       }).id
     : undefined
 
+  // Counts merchant-declared certifications only; not an environmental rating.
   const certRow = matrix['certifications']
-  const winnerByEco = certRow
+  const winnerByCertifications = certRow
     ? products.reduce((best, p) => {
         const count = (certRow[p.id] as string[])?.length ?? 0
         const bestCount = (certRow[best.id] as string[])?.length ?? 0
@@ -356,7 +359,7 @@ async function handleCommerceCompare(args: Record<string, unknown>) {
 
   return {
     winner_by_price: winnerByPrice,
-    winner_by_eco: winnerByEco,
+    winner_by_certifications: winnerByCertifications,
     products: products.map((p) => ({ id: p.id, title: p.raw_title })),
     matrix,
   }
@@ -384,7 +387,9 @@ async function handleCommerceCheckout(args: Record<string, unknown>) {
     },
   })
 
-  if (!product) throw new Error(`Product ${productId} not found for this merchant`)
+  if (!product || product.productRaw.deletedAt || product.productRaw.status !== 'active') {
+    throw new Error(`Product ${productId} not found for this merchant`)
+  }
   if (!product.merchant.storefrontToken) {
     throw new Error(
       'Storefront token not provisioned for this merchant. Re-install the CAP app.',
@@ -526,5 +531,5 @@ export async function startMcpServer() {
 
   const transport = new StdioServerTransport()
   await server.connect(transport)
-  console.log('[MCP] Commerce Agent Protocol server running (stdio)')
+  console.error('[MCP] Commerce Agent Protocol server running (stdio)')
 }

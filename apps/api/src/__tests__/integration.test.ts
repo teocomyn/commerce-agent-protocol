@@ -10,7 +10,7 @@ import { checkoutRouter } from '../routes/checkout.js'
 import { oauthRouter } from '../routes/shopify/oauth.js'
 import { CAP_WEBHOOK_TOPICS, decryptToken, encryptToken } from '../lib/shopify.js'
 import { redis } from '../lib/redis.js'
-import { catalogSyncQueue, deadLetterQueue, enrichmentQueue } from '../lib/queue.js'
+import { catalogSyncQueue, deadLetterQueue, enrichmentQueue, queueFullCatalogSync } from '../lib/queue.js'
 import { getValidShopifyAdminToken } from '../lib/shopify-token.js'
 import { checkReadiness, operationsRouter } from '../routes/operations.js'
 
@@ -84,6 +84,7 @@ describe.sequential('CAP integration boundaries', () => {
         merchantId: merchantA,
         shopifyId: BigInt(`1${Date.now()}`),
         title: 'Tenant A Shoe',
+        status: 'active',
         variants: [{ id: 101, inventory_item_id: 9001, price: '29.00', inventory_quantity: 4, title: 'Default' }],
         images: [],
       },
@@ -93,6 +94,7 @@ describe.sequential('CAP integration boundaries', () => {
         merchantId: merchantB,
         shopifyId: BigInt(`2${Date.now()}`),
         title: 'Tenant B Shoe',
+        status: 'active',
         variants: [{ id: 202, inventory_item_id: 9002, price: '39.00', inventory_quantity: 5, title: 'Default' }],
         images: [],
       },
@@ -496,6 +498,61 @@ describe.sequential('CAP integration boundaries', () => {
     })
   })
 
+  it('hides draft products from search, compare and checkout', async () => {
+    // A second, active product so compare has something valid to pair with.
+    const otherRaw = await prisma.productRaw.create({
+      data: {
+        merchantId: merchantA,
+        shopifyId: BigInt(`3${Date.now()}`),
+        title: 'Tenant A Sandal',
+        status: 'active',
+        variants: [{ id: 103, price: '19.00', inventory_quantity: 3, title: 'Default' }],
+        images: [],
+      },
+    })
+    const other = await prisma.productEnriched.create({
+      data: {
+        productRawId: otherRaw.id, merchantId: merchantA, specs: {}, useCases: [],
+        targetAudience: [], certifications: [], comparisonTags: [], priceMin: 19,
+        priceMax: 19, currency: 'EUR',
+      },
+    })
+    await prisma.productRaw.updateMany({ where: { id: { not: otherRaw.id }, merchantId: merchantA }, data: { status: 'draft' } })
+    try {
+      const app = new Hono()
+      app.use('/v1/*', authMiddleware)
+      app.route('/v1/search', searchRouter)
+      app.route('/v1/compare', compareRouter)
+      app.route('/v1/checkout', checkoutRouter)
+      const compare = await app.request('/v1/compare', {
+        method: 'POST',
+        headers: { 'X-CAP-Key': validKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_ids: [productA, other.id] }),
+      })
+      expect(compare.status).toBe(404)
+
+      const search = await app.request('/v1/search', {
+        method: 'POST',
+        headers: { 'X-CAP-Key': validKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: 'draft visibility check' }),
+      })
+      expect(search.status).toBe(200)
+      const body = await search.json() as { results: Array<{ id: string }> }
+      expect(body.results.map((product) => product.id)).not.toContain(productA)
+
+      const checkout = await app.request('/v1/checkout/initiate', {
+        method: 'POST',
+        headers: { 'X-CAP-Key': validKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_id: productA, quantity: 1, shipping_country: 'FR' }),
+      })
+      expect(checkout.status).toBe(404)
+      await expect(checkout.json()).resolves.toMatchObject({ error: { code: 'PRODUCT_NOT_FOUND' } })
+    } finally {
+      await prisma.productRaw.delete({ where: { id: otherRaw.id } })
+      await prisma.productRaw.updateMany({ where: { merchantId: merchantA }, data: { status: 'active' } })
+    }
+  })
+
   it('rate limits a key after its plan quota', async () => {
     const key = await createKey(merchantA, 'integration-rate-limit')
     const app = protectedApp()
@@ -548,6 +605,49 @@ describe.sequential('CAP integration boundaries', () => {
       expect(body).toContain('cap_webhook_events_total')
     } finally {
       delete process.env.CAP_OPERATIONS_TOKEN
+    }
+  })
+
+  it('queues a full catalog sync for every active install on confirmation', async () => {
+    process.env.CAP_OPERATIONS_TOKEN = 'integration-operations-secret-at-least-32-chars'
+    const startedAt = Date.now()
+    try {
+      const request = (body: unknown) => operationsRouter.request('/catalog-sync', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.CAP_OPERATIONS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      })
+      expect((await request({})).status).toBe(400)
+      const response = await request({ confirm: true })
+      expect(response.status).toBe(200)
+      const { queued } = await response.json() as { queued: number }
+      expect(queued).toBeGreaterThanOrEqual(1)
+      const jobs = await catalogSyncQueue.getJobs(['waiting', 'prioritized', 'delayed'])
+      expect(jobs.some((job) => job.id?.startsWith(`operations-resync-${merchantA}-`))).toBe(true)
+
+      // A second confirmation while those jobs wait does not queue them twice,
+      // and says so.
+      const retry = await request({ confirm: true })
+      expect(retry.status).toBe(200)
+      expect(await retry.json()).toMatchObject({ ignored: queued })
+      const afterRetry = await catalogSyncQueue.getJobs(['waiting', 'prioritized', 'delayed'])
+      const merchantAJobs = afterRetry.filter((job) => job.id?.startsWith(`operations-resync-${merchantA}-`))
+      expect(merchantAJobs).toHaveLength(1)
+
+      // Removing the waiting job releases the shop: it can be queued again.
+      await merchantAJobs[0]!.remove()
+      expect(await queueFullCatalogSync(merchantA, domains[0]!, { jobId: `operations-resync-${merchantA}-again` }))
+        .toBe(true)
+    } finally {
+      delete process.env.CAP_OPERATIONS_TOKEN
+      // The fake stores must never reach a running catalog worker.
+      const queued = await catalogSyncQueue.getJobs(['waiting', 'prioritized', 'delayed'])
+      await Promise.all(queued
+        .filter((job) => job.id?.startsWith('operations-resync-') && job.timestamp >= startedAt)
+        .map((job) => job.remove()))
     }
   })
 

@@ -37,11 +37,11 @@ const footerLinks: FooterSection[] = [
     ],
   },
   {
-    label: 'Company',
+    label: 'Project',
     links: [
       { title: 'About', href: '#protocol' },
-      { title: 'Roadmap', href: '#roadmap' },
-      { title: 'Pricing', href: '#pricing' },
+      { title: 'Contributing', href: 'https://github.com/teocomyn/commerce-agent-protocol/blob/main/CONTRIBUTING.md', external: true },
+      { title: 'Issues', href: 'https://github.com/teocomyn/commerce-agent-protocol/issues', external: true },
       { title: 'FAQ', href: '#faq' },
     ],
   },
@@ -82,7 +82,7 @@ export function Footer() {
           </div>
           <p className="text-muted text-sm leading-relaxed max-w-xs">
             The open protocol connecting e-commerce catalogs to AI shopping agents.
-            Neutral. Signed. Multi-vendor.
+            Open spec. Shopify today. Apache 2.0.
           </p>
           <p className="text-subtle text-xs mt-8 font-mono">
             © {new Date().getFullYear()} CAP contributors · Apache 2.0

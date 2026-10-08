@@ -41,7 +41,9 @@ compareRouter.post('/', capJsonValidator(CompareRequestSchema), async (c) => {
      JOIN products_raw pr ON pr.id = pe.product_raw_id
      WHERE pe.id = ANY($1::uuid[])
        AND pe.merchant_id = $2::uuid
-       AND pe.deleted_at IS NULL`,
+       AND pe.deleted_at IS NULL
+       AND pr.deleted_at IS NULL
+       AND pr.status = 'active'`,
     product_ids,
     auth.merchantId,
   )
@@ -118,8 +120,9 @@ compareRouter.post('/', capJsonValidator(CompareRequestSchema), async (c) => {
       }).id
     : undefined
 
+  // Counts merchant-declared certifications only; not an environmental rating.
   const certRow = matrix['certifications']
-  const winnerByEco = certRow
+  const winnerByCertifications = certRow
     ? products.reduce((best, p) => {
         const count = (certRow[p.id] as string[])?.length ?? 0
         const bestCount = (certRow[best.id] as string[])?.length ?? 0
@@ -130,7 +133,7 @@ compareRouter.post('/', capJsonValidator(CompareRequestSchema), async (c) => {
   const response: CompareResponse = {
     comparison: {
       winner_by_price: winnerByPrice,
-      winner_by_eco: winnerByEco,
+      winner_by_certifications: winnerByCertifications,
       matrix,
     },
   }

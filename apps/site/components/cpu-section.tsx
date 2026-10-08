@@ -19,11 +19,11 @@ export function CpuSection() {
           overline="UNDER THE HOOD"
           title={
             <>
-              One CPU.<br />
-              Eight signals. Every commerce agent.
+              One pipeline.<br />
+              Four flows, scoped per merchant.
             </>
           }
-          sub="CAP routes catalog data, agent queries, signed checkouts, fraud signals, fulfilment events, refunds, reviews and webhooks through a single deterministic pipeline. The protocol is the bus."
+          sub="CAP routes catalog data, agent queries, checkout creation and Shopify webhooks (products, inventory, orders, app uninstall) through a single pipeline. The protocol is the bus."
           className="mb-12"
         />
 

@@ -56,7 +56,6 @@ export interface ProductResult {
   merchant: {
     name: string
     domain: string
-    trust_score: number
   }
   price: {
     amount: number
@@ -105,24 +104,25 @@ export interface SearchResponse {
 export interface CompareResponse {
   comparison: {
     winner_by_price?: string | undefined
-    winner_by_eco?: string | undefined
+    /** Product with the most merchant-declared certifications */
+    winner_by_certifications?: string | undefined
     matrix: Record<string, Record<string, unknown>>
   }
 }
 
 // ============================================================
-// LLM ENRICHMENT OUTPUT (Structured Output schema)
+// LLM ENRICHMENT OUTPUT (normalized)
 // ============================================================
+// Certifications and comparable products are factual claims: they come from
+// the merchant's `cap.*` metafields, never from the model.
 export const EnrichmentOutputSchema = z.object({
   category: z.string().describe('Product category in format "MainCategory > SubCategory"'),
   subcategory: z.string().describe('Specific subcategory'),
   specs: z.record(z.union([z.string(), z.number(), z.boolean()])).describe('Structured product specifications'),
   use_cases: z.array(z.string()).describe('List of use cases for this product'),
   target_audience: z.array(z.string()).describe('Target audience descriptors (gender, age, lifestyle)'),
-  certifications: z.array(z.string()).describe('Product certifications (OEKO-TEX, GOTS, B-Corp, etc.)'),
   care_info: z.string().optional().describe('Care instructions'),
-  size_guide: z.record(z.unknown()).optional().describe('Size guide if applicable'),
-  comparison_tags: z.array(z.string()).describe('Well-known comparable products (brand + model)'),
+  size_guide: z.record(z.string()).optional().describe('Size guide if applicable'),
   summary: z.string().describe('One sentence agent-optimized product summary'),
 })
 

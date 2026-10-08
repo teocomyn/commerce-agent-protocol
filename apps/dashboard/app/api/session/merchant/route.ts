@@ -1,34 +1,63 @@
-import crypto from 'node:crypto'
 import { NextResponse, type NextRequest } from 'next/server'
 import { prisma } from '@cap/db'
 import {
   createDashboardSessionToken,
+  dashboardPublicOrigin,
   dashboardSessionCookie,
+  isSameOriginMutation,
 } from '@/lib/dashboard-session'
+import {
+  OWNER_LOGIN_COOKIE,
+  findPendingOwnerLoginToken,
+  isOwnerLoginTokenFormat,
+  ownerLoginCookieOptions,
+} from '@/lib/owner-login'
 
+/**
+ * Landing URL of the cross-site redirect from the API after Shopify OAuth.
+ * It never consumes the token or creates a session: a cross-site GET cannot be
+ * distinguished from login CSRF. The token moves into a short-lived HttpOnly
+ * cookie and the browser goes to a same-origin confirmation page, whose POST
+ * consumes it. The token is not kept in the confirmation URL or history.
+ */
 export async function GET(req: NextRequest) {
-  const rawToken = req.nextUrl.searchParams.get('token')
-  if (!rawToken) {
-    return NextResponse.json({ error: 'Missing login token' }, { status: 400 })
+  const rawToken = req.nextUrl.searchParams.get('token') ?? ''
+  // Public origin, not req.url: behind the proxy req.url is http, and the
+  // browser would not send the Secure handoff cookie to the next page.
+  const response = NextResponse.redirect(new URL('/session/confirm', dashboardPublicOrigin(req)), 303)
+  if (isOwnerLoginTokenFormat(rawToken)) {
+    response.cookies.set(OWNER_LOGIN_COOKIE, rawToken, ownerLoginCookieOptions())
+  } else {
+    response.cookies.set(OWNER_LOGIN_COOKIE, '', ownerLoginCookieOptions(0))
+  }
+  response.headers.set('Cache-Control', 'no-store')
+  response.headers.set('Referrer-Policy', 'no-referrer')
+  return response
+}
+
+export async function POST(req: NextRequest) {
+  if (!isSameOriginMutation(req)) {
+    return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })
+  }
+  const rawToken = req.cookies.get(OWNER_LOGIN_COOKIE)?.value ?? ''
+  const body = await req.json().catch(() => null) as { merchantId?: unknown } | null
+  // A broken request is not "another store connected": answer it as such.
+  if (typeof body?.merchantId !== 'string') {
+    return NextResponse.json({ error: 'Invalid sign-in request. Reload this page and try again.' }, { status: 400 })
   }
 
-  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex')
   const now = new Date()
-  const loginToken = await prisma.dashboardLoginToken.findUnique({
-    where: { tokenHash },
-    include: {
-      merchant: { select: { uninstalledAt: true } },
-      user: { select: { id: true } },
-    },
-  })
-
-  if (
-    !loginToken ||
-    loginToken.consumedAt ||
-    loginToken.expiresAt <= now ||
-    loginToken.merchant.uninstalledAt
-  ) {
+  const loginToken = await findPendingOwnerLoginToken(rawToken, now)
+  if (!loginToken) {
     return NextResponse.json({ error: 'Invalid or expired login token' }, { status: 401 })
+  }
+  // Another Shopify connection in this browser may have replaced the handoff
+  // cookie since the page was rendered: never sign in to a store other than
+  // the one the owner just confirmed.
+  if (body.merchantId !== loginToken.merchantId) {
+    return NextResponse.json({
+      error: 'Another store was connected in this browser. Reload this page to confirm that store.',
+    }, { status: 409 })
   }
 
   const membership = await prisma.merchantMember.findUnique({
@@ -53,18 +82,14 @@ export async function GET(req: NextRequest) {
   }
 
   const sessionToken = createDashboardSessionToken({
-    userId: loginToken.user.id,
+    userId: loginToken.userId,
     merchantId: loginToken.merchantId,
     role: membership.role,
   })
-  const url = new URL('/dashboard', req.url)
-  url.searchParams.set('connected', 'true')
-
-  const response = NextResponse.redirect(url)
+  const response = NextResponse.json({ authenticated: true, redirect: '/dashboard' })
   const cookie = dashboardSessionCookie(sessionToken)
   response.cookies.set(cookie.name, cookie.value, cookie.options)
+  response.cookies.set(OWNER_LOGIN_COOKIE, '', ownerLoginCookieOptions(0))
   response.headers.set('Cache-Control', 'no-store')
-  response.headers.set('Referrer-Policy', 'no-referrer')
-
   return response
 }

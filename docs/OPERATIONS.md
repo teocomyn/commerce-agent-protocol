@@ -33,6 +33,12 @@ Alert immediately when `/ready` is non-200, the dead-letter queue is non-empty, 
 
 The `catalog-sync` queue contains both full catalog pulls and authoritative inventory snapshots. An `inventory_levels/update` webhook applies a fail-closed local update immediately, then schedules an `inventory-level-sync` job to refresh the total and per-location quantities from Admin GraphQL. A sustained inventory-job backlog means checkout availability may remain conservatively unavailable until the catalog worker catches up.
 
+## Full catalog resync
+
+`POST /internal/operations/catalog-sync` with `{"confirm":true}` queues a full catalog sync for every active install and returns `{ "queued": n, "ignored": m }`: a shop whose full sync (from an install, an earlier resync or any other producer) is still waiting or running is not queued again and counts as ignored. Use it after a release that changes stored product data. It calls Shopify for every product and OpenAI for every active product on each run, so run it once, not on a schedule. 
+
+A full sync reads every product, active or not, so a product that became a draft or was archived while its webhook was missed is hidden on the next sync. Inactive products only have their stored status updated: they are not enriched and get no inventory job.
+
 ## Dead-letter inspection and replay
 
 List at most 100 recent entries:

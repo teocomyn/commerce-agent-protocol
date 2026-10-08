@@ -1,0 +1,12 @@
+---
+description: Shared project memory and handoff rules for Codex, Claude Code, and Cursor
+globs:
+alwaysApply: true
+---
+
+Before architecture, infrastructure, deployment, or substantial implementation work, read `AI_CONTEXT.md`, `AI_HANDOFF.md`, and `AGENTS.md`.
+
+- Preserve uncommitted work from other tools.
+- Use Git branches or worktrees for concurrent edits.
+- Keep stable decisions in `AI_CONTEXT.md` and the current execution state in `AI_HANDOFF.md`.
+- Context files never authorize purchases, destructive actions, deployments, or external writes.

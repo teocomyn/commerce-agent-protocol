@@ -81,6 +81,8 @@ Semantic + filtered product retrieval.
 - `query` **MUST** be present, 1–500 chars.
 - `sort` **MUST** be one of `relevance | price_asc | price_desc | geo_score`.
 - Servers **MUST** filter results to the calling merchant's catalog.
+- Servers **MUST** only return products the merchant currently offers for sale (for example Shopify status `ACTIVE`); drafts and archived products are never exposed.
+- `certifications` **MUST** come from data declared by the merchant. Servers **MUST NOT** infer or generate certifications, labels or environmental claims.
 
 **Response body** — see `examples/search-response.json`. Each result **MUST** include a stable `id`, `merchant`, `price`, `availability`, and a `checkout_url` that points at the same server's checkout endpoint.
 

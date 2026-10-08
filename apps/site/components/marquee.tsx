@@ -1,8 +1,8 @@
 import { Sparkles } from './ui/sparkles'
 
-// Stylised wordmark logos — text rendered in JetBrains Mono with a subtle
-// gradient + tracking, used as visual references for agent / merchant
-// ecosystems (no real brand assets, no trademark claims).
+// Plain-text wordmarks for the interfaces and platform the v0.1 reference
+// implementation supports today. They describe compatibility only: no
+// partnership, endorsement or adoption is implied, and no brand assets are used.
 function Wordmark({ children }: { children: React.ReactNode }) {
   return (
     <span className="font-mono text-xs sm:text-sm md:text-base font-medium tracking-tight text-fg/80 hover:text-fg transition-colors duration-300 truncate text-center">
@@ -21,8 +21,10 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-const agents = ['Claude', 'ChatGPT', 'Perplexity', 'Operator', 'Cursor']
-const merchants = ['Shopify', 'WooCommerce', 'Salesforce', 'Stripe', 'MCP']
+// Local stdio MCP clients and the HTTP interfaces exposed by the API.
+const agentInterfaces = ['Claude Desktop', 'Cursor', 'MCP stdio', 'REST', 'OpenAPI']
+// Shopify is the only supported platform in v0.1.
+const shopifyIntegration = ['Shopify', 'OAuth', 'Admin GraphQL', 'Cart API', 'Webhooks']
 
 export function Marquee() {
   return (
@@ -30,30 +32,31 @@ export function Marquee() {
       {/* Two-row label + logo grid sits in the upper half */}
       <div className="relative z-10 mx-auto max-w-3xl pt-24 px-6 sm:px-8 text-center">
         <p className="font-mono text-[11px] uppercase tracking-widest text-subtle mb-3">
-          THE NETWORK
+          WORKS TODAY WITH
         </p>
         <h2 className="font-semibold tracking-tighter leading-[1.1] text-3xl sm:text-4xl lg:text-5xl">
-          Trusted by{' '}
-          <span className="text-gradient-brand">agents</span> and{' '}
-          <span className="text-gradient-pulse">merchants</span> worldwide.
+          Built on{' '}
+          <span className="text-gradient-brand">open standards</span>.{' '}
+          <br className="hidden sm:block" />
+          Shipping for <span className="text-gradient-pulse">Shopify</span>.
         </h2>
         <p className="text-muted text-base sm:text-lg mt-4 max-w-xl mx-auto leading-relaxed">
-          One open protocol bridges every shopping agent and every merchant catalog.
-          No glue code. No vendor lock-in. No silos.
+          A REST API and a local MCP server in front of your Shopify catalog.
+          Other platforms and remote MCP transports are open to contributions.
         </p>
 
         <div className="mt-12">
-          <GroupLabel>AGENTS</GroupLabel>
+          <GroupLabel>AGENT INTERFACES</GroupLabel>
           <div className="grid grid-cols-3 sm:grid-cols-5 gap-x-2 gap-y-3">
-            {agents.map((a) => (
+            {agentInterfaces.map((a) => (
               <Wordmark key={a}>{a}</Wordmark>
             ))}
           </div>
         </div>
         <div className="mt-6">
-          <GroupLabel>MERCHANTS</GroupLabel>
+          <GroupLabel>PLATFORM</GroupLabel>
           <div className="grid grid-cols-3 sm:grid-cols-5 gap-x-2 gap-y-3">
-            {merchants.map((m) => (
+            {shopifyIntegration.map((m) => (
               <Wordmark key={m}>{m}</Wordmark>
             ))}
           </div>

@@ -69,9 +69,9 @@ function CardHeading({ icon: Icon, title, description }: CardHeadingProps) {
 
 // Visual: animated semantic-search demo
 function SearchVisual() {
-  const queries = ['eco sneakers under €120', 'organic cotton tee', 'GOTS certified']
+  const queries = ['white sneakers under €120', 'organic cotton tee', 'merchant-declared GOTS']
   const result = {
-    title: 'VEJA Campo Chromefree White',
+    title: 'Leather sneaker, white (sample)',
     price: '€110',
     geo: 87,
   }
@@ -90,8 +90,8 @@ function SearchVisual() {
             <Search className="size-3 text-accent flex-shrink-0" />
             <span className="text-muted truncate">{q}</span>
             {i === 0 && (
-              <span className="ml-auto text-pulse text-[10px] tracking-widest font-medium">
-                197ms
+              <span className="ml-auto text-pulse text-[10px] uppercase tracking-widest font-medium">
+                semantic
               </span>
             )}
           </div>
@@ -104,7 +104,7 @@ function SearchVisual() {
             <div className="size-8 rounded bg-edge-strong flex-shrink-0" />
             <div className="min-w-0">
               <div className="text-fg text-[13px] font-medium truncate">{result.title}</div>
-              <div className="font-mono text-[10px] text-subtle">geo {result.geo}/100 · in stock</div>
+              <div className="font-mono text-[10px] text-subtle truncate">demo data · geo {result.geo}/100 · in stock</div>
             </div>
           </div>
           <span className="font-semibold text-base text-gradient-brand flex-shrink-0">{result.price}</span>
@@ -114,7 +114,7 @@ function SearchVisual() {
   )
 }
 
-// Visual: signed checkout flow
+// Visual: checkout creation flow (the shopper completes payment on Shopify)
 function CheckoutVisual() {
   return (
     <div className="relative px-6 pb-6">
@@ -124,7 +124,7 @@ function CheckoutVisual() {
           { label: 'POST /v1/checkout/initiate', tone: 'method' as const },
           { label: 'merchant ✓ variant ✓ stock ✓', tone: 'check' as const },
           { label: 'cartCreate → Shopify Storefront', tone: 'pulse' as const },
-          { label: 'checkout.url returned · 240ms', tone: 'success' as const },
+          { label: 'checkout.url returned · shopper pays on Shopify', tone: 'success' as const },
         ].map((step, i) => (
           <div
             key={i}
@@ -197,38 +197,41 @@ function CircularUI({
 
 const bentoItems: BentoItem[] = [
   {
-    title: 'Multi-merchant',
-    meta: '∞ stores',
-    description: 'Connect Shopify, WooCommerce, or any custom catalog. CAP federates them.',
+    title: 'Shopify today',
+    meta: 'OAuth',
+    description:
+      'Shopify OAuth install, catalog sync via Admin GraphQL, HMAC-verified webhooks. Open spec for other platforms.',
     icon: <Globe className="w-4 h-4 text-accent" />,
-    status: 'Live',
-    tags: ['Federation', 'Adapters'],
+    status: 'v0.1',
+    tags: ['Shopify', 'Open spec'],
     colSpan: 2,
     hasPersistentHover: true,
   },
   {
     title: 'Vector embeddings',
     meta: '1536d',
-    description: 'pgvector with ivfflat ANN over text-embedding-3-small.',
+    description: 'pgvector cosine similarity over text-embedding-3-small, with a lexical fallback.',
     icon: <Layers className="w-4 h-4 text-accent" />,
-    status: 'Live',
+    status: 'v0.1',
     tags: ['Postgres', 'Search'],
   },
   {
-    title: 'Signed transactions',
-    meta: 'Ed25519',
-    description: 'Cryptographic signatures across the entire transaction chain.',
+    title: 'Authenticated access',
+    meta: 'SHA-256',
+    description:
+      'API keys stored as SHA-256 hashes, per-plan rate limits, Shopify tokens encrypted with AES-256-GCM.',
     icon: <ShieldCheck className="w-4 h-4 text-pulse" />,
-    status: 'v0.2',
-    tags: ['Crypto', 'Security'],
+    status: 'v0.1',
+    tags: ['Auth', 'Security'],
   },
   {
-    title: 'Sub-300ms search',
-    meta: 'p50',
-    description: 'Hybrid vector + SQL filters with merchant-scoped multi-tenancy.',
+    title: 'Enrichment + GEO score',
+    meta: '0-100',
+    description:
+      'GPT-4o-mini enriches product data, and a GEO score flags how complete each listing is for agents. Each API key is scoped to one merchant.',
     icon: <Zap className="w-4 h-4 text-accent" />,
-    status: 'Live',
-    tags: ['Performance'],
+    status: 'v0.1',
+    tags: ['LLM', 'Catalog'],
     colSpan: 2,
   },
 ]
@@ -241,11 +244,11 @@ export function FeaturesBento() {
           overline="THE PROTOCOL"
           title={
             <>
-              The plumbing every commerce agent
-              <br className="hidden sm:block" /> ends up depending on.
+              The plumbing between commerce agents
+              <br className="hidden sm:block" /> and real store catalogs.
             </>
           }
-          sub="Three pillars, one neutral protocol. Catalog ingestion, signed transactions, and a native MCP server — open spec, hosted reference."
+          sub="Three pillars, one open protocol. Catalog sync and enrichment, checkout through the Shopify Cart API, and an MCP server. Open spec, self-hosted reference implementation."
           className="mb-16"
         />
 
@@ -268,8 +271,8 @@ export function FeaturesBento() {
             <CardHeader className="pb-3">
               <CardHeading
                 icon={ShoppingCart}
-                title="02 / SIGNED CHECKOUT"
-                description="One API call. Cart created. Payment URL returned."
+                title="02 / CART CHECKOUT"
+                description="One API call. Cart created. The shopper pays on Shopify."
               />
             </CardHeader>
             <CardContent className="px-0 pb-0">
@@ -282,7 +285,7 @@ export function FeaturesBento() {
             <p className="mx-auto max-w-md text-balance text-center text-2xl sm:text-[26px] font-semibold leading-[1.25] text-fg">
               Native <span className="text-gradient-brand">MCP</span> server. Three tools.
               <br />
-              Plug into Claude, Cursor, or any agent.
+              Runs over stdio in Claude Desktop, Cursor and other local MCP clients.
             </p>
 
             <div className="flex justify-center gap-6 sm:gap-10 mt-10 overflow-hidden">
@@ -299,7 +302,7 @@ export function FeaturesBento() {
                 circles={[{ pattern: 'accent' }, { pattern: 'none' }]}
               />
               <CircularUI
-                label="federation"
+                label="stdio"
                 circles={[{ pattern: 'primary' }, { pattern: 'none' }]}
                 className="hidden sm:block"
               />
@@ -316,7 +319,7 @@ export function FeaturesBento() {
             <span className="h-px flex-1 bg-edge" />
             <span className="font-mono text-[10px] text-subtle">
               <GitBranch className="inline size-3 mr-1" />
-              v0.1 + v0.2
+              v0.1 alpha
             </span>
           </div>
           <BentoGrid items={bentoItems} />

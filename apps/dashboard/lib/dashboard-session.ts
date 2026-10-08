@@ -1,6 +1,8 @@
 import crypto from 'node:crypto'
 import { cookies } from 'next/headers'
 import { prisma, type MerchantRole } from '@cap/db'
+import { dashboardSessionSecret } from './session-secret'
+import { configuredDashboardOrigin } from './public-origin'
 
 export const DASHBOARD_SESSION_COOKIE = 'cap_dashboard_session'
 const SESSION_TTL_SECONDS = 8 * 60 * 60
@@ -12,16 +14,8 @@ export interface DashboardSession {
   expiresAt: number
 }
 
-function sessionSecret(): string {
-  const secret = process.env.DASHBOARD_SESSION_SECRET
-  if (!secret || secret.length < 32) {
-    throw new Error('DASHBOARD_SESSION_SECRET must contain at least 32 characters')
-  }
-  return secret
-}
-
 function signature(payload: string): string {
-  return crypto.createHmac('sha256', sessionSecret()).update(payload).digest('base64url')
+  return crypto.createHmac('sha256', dashboardSessionSecret()).update(payload).digest('base64url')
 }
 
 export function createDashboardSessionToken(
@@ -104,12 +98,60 @@ export function dashboardSessionCookie(token: string) {
   }
 }
 
+function firstHeaderValue(request: Request, name: string): string | undefined {
+  return request.headers.get(name)?.split(',')[0]?.trim() || undefined
+}
+
+function requestDerivedOrigin(request: Request): string {
+  const url = new URL(request.url)
+  const scheme = firstHeaderValue(request, 'x-forwarded-proto') ?? url.protocol.replace(':', '')
+  const host = firstHeaderValue(request, 'x-forwarded-host') ?? request.headers.get('host') ?? url.host
+  return `${scheme}://${host}`
+}
+
+/**
+ * Public origin for redirects. Behind Render's proxy request.url carries the
+ * internal http scheme, which would make browsers drop Secure cookies. In
+ * production it comes only from DASHBOARD_URL (validated at boot); request
+ * headers, which clients control, are trusted only outside production.
+ */
+export function dashboardPublicOrigin(request: Request): string {
+  const configured = configuredDashboardOrigin()
+  if (configured) return configured
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('DASHBOARD_URL must be set in production')
+  }
+  return requestDerivedOrigin(request)
+}
+
+/**
+ * Origins allowed to send cookie-authenticated mutations. Production fails
+ * closed: without a valid DASHBOARD_URL no origin is accepted.
+ */
+function expectedOrigins(request: Request): string[] {
+  const configured = configuredDashboardOrigin()
+  if (process.env.NODE_ENV === 'production') return configured ? [configured] : []
+  return configured ? [configured, requestDerivedOrigin(request)] : [requestDerivedOrigin(request)]
+}
+
+/** Compares the full origin (scheme, host and port), not only the host. */
 export function isSameOriginMutation(request: Request): boolean {
   const origin = request.headers.get('origin')
   if (!origin) return process.env.NODE_ENV !== 'production'
   try {
-    return new URL(origin).host === new URL(request.url).host
+    return expectedOrigins(request).includes(new URL(origin).origin)
   } catch {
     return false
   }
+}
+
+/**
+ * Client address for rate limiting. Render's proxy appends the address it saw
+ * to X-Forwarded-For, so the rightmost entry is the one a client cannot forge;
+ * leftmost entries are client-supplied. (Assumes no other proxy in front.)
+ */
+export function clientAddress(request: Request): string {
+  const forwarded = request.headers.get('x-forwarded-for')
+  const hops = forwarded?.split(',').map((hop) => hop.trim()).filter(Boolean) ?? []
+  return hops.at(-1) ?? 'unknown'
 }

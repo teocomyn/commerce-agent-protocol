@@ -5,6 +5,7 @@ import {
   deadLetterQueue,
   enrichmentQueue,
   getQueueStats,
+  queueFullCatalogSync,
 } from '../lib/queue.js'
 import { redis } from '../lib/redis.js'
 import {
@@ -108,6 +109,35 @@ operationsRouter.post('/dead-letter/:id/replay', async (c) => {
     source_job_id: deadLetter.sourceJobId ?? null,
     replay_job_id: replayed.id,
   })
+})
+
+// Queues a full catalog sync for every active install, e.g. after a release
+// that changes how products are stored (merchant claims, statuses). Calls
+// Shopify and may call OpenAI for every product whose content changed.
+operationsRouter.post('/catalog-sync', async (c) => {
+  const body = await c.req.json().catch(() => null) as { confirm?: boolean } | null
+  if (body?.confirm !== true) {
+    return c.json({
+      error: {
+        code: 'CATALOG_SYNC_CONFIRMATION_REQUIRED',
+        message: 'Set confirm=true to queue a full catalog sync for every active install',
+      },
+    }, 400)
+  }
+  const merchants = await prisma.merchant.findMany({
+    where: { uninstalledAt: null, shopifyToken: { not: null } },
+    select: { id: true, shopifyDomain: true },
+  })
+  const requestedAt = Date.now()
+  // A shop whose full sync (from any producer) is still waiting or running is
+  // not queued again; it is reported as ignored.
+  const results = await Promise.all(merchants.map((merchant) => queueFullCatalogSync(
+    merchant.id,
+    merchant.shopifyDomain,
+    { jobId: `operations-resync-${merchant.id}-${requestedAt}` },
+  )))
+  const queued = results.filter(Boolean).length
+  return c.json({ queued, ignored: results.length - queued })
 })
 
 operationsRouter.get('/metrics', async (c) => {

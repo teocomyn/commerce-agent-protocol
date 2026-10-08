@@ -47,7 +47,7 @@ export function Architecture() {
         <SectionHead
           overline="ARCHITECTURE"
           title={<>How CAP fits in your stack.</>}
-          sub="Drop CAP between your catalog and any agent. We handle ingestion, vectorization, signing, rate limiting. You keep your store; we make it agent-readable."
+          sub="Run CAP between your Shopify store and your agents. It handles ingestion, enrichment, vectorization, API key auth and rate limiting. You keep your store; CAP makes it agent-readable."
           className="mb-20"
         />
 
@@ -58,35 +58,31 @@ export function Architecture() {
         ">
           {/* Desktop: horizontal flow */}
           <div className="hidden md:flex items-center justify-between gap-2">
-            <div className="flex flex-col gap-3">
-              <FlowNode label="SHOPIFY" sub="merchants" />
-              <FlowNode label="WOO" sub="merchants" />
-              <FlowNode label="CUSTOM" sub="merchants" />
-            </div>
+            <FlowNode label="SHOPIFY" sub="only platform today" />
             <FlowArrow label="OAuth" />
             <FlowNode label="CAP" sub="protocol + infra" variant="primary" />
-            <FlowArrow label="signed API" />
+            <FlowArrow label="REST: API key" />
             <div className="flex flex-col gap-3">
-              <FlowNode label="CLAUDE" sub="agent" variant="pulse" />
-              <FlowNode label="CHATGPT" sub="agent" variant="pulse" />
-              <FlowNode label="MCP CLIENT" sub="agent" variant="pulse" />
+              <FlowNode label="CLAUDE DESKTOP" sub="mcp stdio" variant="pulse" />
+              <FlowNode label="CURSOR" sub="mcp stdio" variant="pulse" />
+              <FlowNode label="YOUR AGENT" sub="rest api" variant="pulse" />
             </div>
           </div>
 
           {/* Mobile: vertical flow */}
           <div className="md:hidden flex flex-col items-center gap-4">
-            <FlowNode label="MERCHANTS" sub="shopify · woo · custom" />
+            <FlowNode label="MERCHANTS" sub="shopify today" />
             <div className="h-8 w-px bg-gradient-to-b from-edge via-accent/60 to-edge" />
             <FlowNode label="CAP" sub="protocol + infra" variant="primary" />
             <div className="h-8 w-px bg-gradient-to-b from-edge via-accent/60 to-edge" />
-            <FlowNode label="AGENTS" sub="claude · chatgpt · mcp" variant="pulse" />
+            <FlowNode label="AGENTS" sub="mcp stdio · rest" variant="pulse" />
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-12 pt-8 border-t border-edge">
             {[
               { k: 'INGEST', v: 'OAuth + webhooks' },
               { k: 'ENRICH', v: 'GPT-4o-mini + embeddings' },
-              { k: 'INDEX', v: 'pgvector ANN' },
+              { k: 'INDEX', v: 'pgvector cosine' },
               { k: 'SERVE', v: 'Hono · MCP · OpenAPI' },
             ].map((c) => (
               <div key={c.k} className="text-left">

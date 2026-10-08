@@ -44,6 +44,42 @@ export function extractCommercePolicies(
   }
 }
 
+const MAX_MERCHANT_CLAIMS = 20
+const MAX_MERCHANT_CLAIM_LENGTH = 100
+
+// Accepts list metafields (JSON arrays) and comma-separated text metafields.
+export function parseMetafieldList(value: string | undefined): string[] {
+  if (!value) return []
+  let items: unknown[]
+  try {
+    const parsed = JSON.parse(value) as unknown
+    // json metafields: an array of strings or a single string; objects and
+    // other JSON values are not a list of claims and are ignored.
+    items = Array.isArray(parsed) ? parsed : typeof parsed === 'string' ? [parsed] : []
+  } catch {
+    // Plain comma-separated text.
+    items = value.split(',')
+  }
+  return [...new Set(items
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim().slice(0, MAX_MERCHANT_CLAIM_LENGTH))
+    .filter(Boolean))]
+    .slice(0, MAX_MERCHANT_CLAIMS)
+}
+
+// Certifications and comparable products are claims shown to shoppers, so they
+// come only from the merchant's own `cap.*` metafields, never from model output.
+export function extractMerchantClaims(metafields: Array<{ key: string; value: string }>): {
+  certifications: string[]
+  comparisonTags: string[]
+} {
+  const byKey = Object.fromEntries(metafields.map((field) => [field.key, field.value]))
+  return {
+    certifications: parseMetafieldList(byKey['certifications']),
+    comparisonTags: parseMetafieldList(byKey['comparison_tags']),
+  }
+}
+
 export function supportsShippingCountry(shippingInfo: unknown, country: string): boolean {
   if (!shippingInfo || typeof shippingInfo !== 'object' || Array.isArray(shippingInfo)) return true
   const countries = (shippingInfo as Record<string, unknown>)['countries']

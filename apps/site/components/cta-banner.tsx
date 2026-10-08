@@ -22,12 +22,12 @@ export function CtaBanner() {
           / SHIP IT
         </p>
         <h2 className="font-semibold tracking-tighter leading-[1.1] text-3xl sm:text-5xl text-gradient-fade max-w-3xl mx-auto">
-          Make your store buyable<br />
-          by every AI agent on Earth.
+          Make your Shopify store<br />
+          readable by AI agents.
         </h2>
         <p className="text-base sm:text-lg text-muted leading-relaxed mt-6 max-w-xl mx-auto">
-          The protocol is open. The reference is shipping. The agents are ready.
-          Plug your catalog in 5 minutes.
+          The spec is open and the reference implementation is Apache 2.0.
+          Self-host it with Postgres + pgvector, Redis, an OpenAI key and a Shopify app.
         </p>
         <div className="flex flex-wrap gap-3 justify-center mt-10 items-center">
           <ShinyButton href="https://github.com/teocomyn/commerce-agent-protocol/tree/main/cap-spec" external>
@@ -38,7 +38,8 @@ export function CtaBanner() {
           </ShinyButton>
           <Button variant="secondary" size="lg" href="https://github.com/teocomyn/commerce-agent-protocol" external>
             <GitHubIcon className="w-4 h-4" />
-            <span>github.com/teocomyn/cap</span>
+            <span className="sm:hidden">View on GitHub</span>
+            <span className="hidden sm:inline">github.com/teocomyn/commerce-agent-protocol</span>
           </Button>
         </div>
       </div>

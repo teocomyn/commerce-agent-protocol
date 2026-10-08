@@ -57,7 +57,10 @@ checkoutRouter.post('/initiate', capJsonValidator(CheckoutInitiateSchema), async
     },
   })
 
-  if (!product || product.deletedAt) {
+  if (
+    !product || product.deletedAt || product.productRaw.deletedAt ||
+    product.productRaw.status !== 'active'
+  ) {
     return c.json<CAPError>({
       error: { code: 'PRODUCT_NOT_FOUND', message: `Product ${product_id} not found` },
     }, 404)

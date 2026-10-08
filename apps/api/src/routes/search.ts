@@ -12,6 +12,7 @@ const openai = new OpenAI({
   maxRetries: 2,
 })
 const searchRouter = new Hono()
+const SEARCH_CACHE_VERSION = 'v2'
 
 function detectAgentType(userAgent: string): string {
   const ua = userAgent.toLowerCase()
@@ -68,7 +69,9 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
   const searchId = `srch_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`
 
   // Cache is scoped per-merchant to honor the multi-tenant filter
-  const cacheKey = `search:${auth.merchantId}:${JSON.stringify({ query, filters, limit, sort })}`
+  // The version segment retires entries cached by older releases, whose
+  // responses may contain inactive products or removed fields.
+  const cacheKey = `search:${auth.merchantId}:${SEARCH_CACHE_VERSION}:${JSON.stringify({ query, filters, limit, sort })}`
   const cached = await cacheGet<SearchResponse>(cacheKey)
   if (cached) {
     const latency = Date.now() - startTime
@@ -110,7 +113,8 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
   }
 
   // Build SQL filters with bound parameters (no string concat for user input)
-  const conditions: string[] = ['pe.deleted_at IS NULL']
+  // Only active, non-deleted Shopify products are visible to agents.
+  const conditions: string[] = ['pe.deleted_at IS NULL', 'pr.deleted_at IS NULL', "pr.status = 'active'"]
   const params: (string | number | boolean | string[])[] = []
   let paramIdx = 1
 
@@ -279,7 +283,6 @@ searchRouter.post('/', capJsonValidator(SearchRequestSchema), async (c) => {
       merchant: {
         name: row.shopify_domain.replace('.myshopify.com', '').replace(/-/g, ' '),
         domain: row.shopify_domain,
-        trust_score: Math.min(100, row.geo_score + 10),
       },
       price: {
         amount: priceAmount,

@@ -23,7 +23,7 @@
 
 Today, when an AI agent wants to buy something for a human, it scrapes HTML, guesses prices, and clicks "Add to cart" buttons that weren't designed for it. It's slow, brittle, and breaks every time a merchant redesigns their store. On the merchant side, getting an AI agent to actually finalize a transaction is impossible — there's no protocol, no standard, no shared language.
 
-**CAP fixes that.** It's a neutral, open layer — not owned by Shopify, Google, or OpenAI — that lets any merchant expose an agent-readable catalog and any agent execute a transaction through a clean, signed API. The spec is free; the reference SaaS is what merchants pay for if they don't want to implement it themselves.
+**CAP fixes that.** It's a neutral, open layer — not owned by Shopify, Google, or OpenAI — that lets a merchant expose an agent-readable catalog and lets agents search, compare and start a checkout through an authenticated API. The shopper still completes payment on the merchant's checkout. The spec and the reference implementation are free (Apache-2.0); Shopify is the only supported platform today.
 
 > If this protocol is going to exist anyway, the question is: *who writes it before the giants do.*
 
@@ -35,7 +35,7 @@ Today, when an AI agent wants to buy something for a human, it scrapes HTML, gue
 |--------|--------------|
 | **1. Agent-readable catalog format** | A versioned JSON schema for products, variants, stock, prices, certifications, shipping, returns — designed to be read by an LLM, not a human. |
 | **2. Transaction API** | `/v1/search` (semantic, vector), `/v1/compare` (matrix), `/v1/checkout/initiate` (Shopify Cart API). Authenticated by API keys, rate-limited per plan. |
-| **3. MCP server** | Stdio MCP server with `commerce_search`, `commerce_compare`, `commerce_checkout` tools. Plug-and-play in Claude Desktop, Cursor, or any MCP client. |
+| **3. MCP server** | Stdio MCP server with `commerce_search`, `commerce_compare`, `commerce_checkout` tools, for local stdio MCP clients such as Claude Desktop and Cursor. No remote MCP transport yet. |
 
 This repository contains both the **spec** (open, versioned in [`cap-spec/`](./cap-spec)) and the **reference implementation** (this monorepo).
 
@@ -71,8 +71,10 @@ docker compose up -d
 
 # 2. Environment
 cp .env.example .env
-# Fill in at minimum: DATABASE_URL, REDIS_URL, OPENAI_API_KEY,
-# ENCRYPTION_KEY (32+ chars), and SHOPIFY_* if you connect a store.
+# Fill in at minimum: DATABASE_URL, REDIS_URL, OPENAI_API_KEY, and SHOPIFY_*
+# if you connect a store. Replace every `change_me` value: processes refuse to
+# start with example secrets. Generate secrets with:
+openssl rand -hex 32   # ENCRYPTION_KEY, CAP_OPERATIONS_TOKEN, DASHBOARD_SESSION_SECRET
 
 # 3. Install + DB schema
 pnpm install
@@ -108,8 +110,10 @@ curl -X POST http://localhost:3000/v1/search \
 **Run as MCP server** (stdio, for Claude Desktop / Cursor):
 
 ```bash
-MCP_MODE=true CAP_MERCHANT_ID=<merchant-uuid> pnpm --filter=@cap/api dev
+CAP_MERCHANT_ID=<merchant-uuid> pnpm --silent -C apps/api mcp
 ```
+
+stdout carries only JSON-RPC frames; logs go to stderr. Keep `--silent` and `-C` (not `--filter`), otherwise pnpm prints its script banner on stdout and breaks the MCP stream. The stdio server reads the database directly with `ENCRYPTION_KEY`, so run it only on a machine you trust with those credentials.
 
 ---
 

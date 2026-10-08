@@ -29,6 +29,28 @@ export const catalogSyncQueue = new Queue('catalog-sync', {
   },
 })
 
+/**
+ * Queues a full catalog sync of one shop. Every producer (OAuth install,
+ * operations resync, re-enrichment after a release) shares one deduplication
+ * key per shop, so two full syncs of a shop never overlap: a request made
+ * while one is waiting or running is ignored. `jobId` must be unique per
+ * request. Returns whether a new job was queued.
+ */
+export async function queueFullCatalogSync(
+  merchantId: string,
+  shopDomain: string,
+  options: { jobId: string; delay?: number; priority?: number },
+): Promise<boolean> {
+  const job = await catalogSyncQueue.add('full-catalog-sync', { merchantId, shopDomain }, {
+    jobId: options.jobId,
+    deduplication: { id: `full-sync-${merchantId}` },
+    ...(options.delay !== undefined && { delay: options.delay }),
+    ...(options.priority !== undefined && { priority: options.priority }),
+  })
+  // A deduplicated add returns the job that is already queued.
+  return job.id === options.jobId
+}
+
 export const deadLetterQueue = new Queue('dead-letter', {
   connection,
   defaultJobOptions: {

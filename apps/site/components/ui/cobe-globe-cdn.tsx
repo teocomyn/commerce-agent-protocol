@@ -23,7 +23,8 @@ interface CapGlobeProps {
   speed?: number
 }
 
-// Major commerce + agent infrastructure hubs.
+// Decorative markers and arcs only. They do not represent deployments,
+// merchants, agents or traffic.
 const defaultMarkers: CapMarker[] = [
   { id: 'sfo', location: [37.77, -122.42], region: 'sfo · agents' },
   { id: 'nyc', location: [40.71, -74.0], region: 'nyc · commerce' },

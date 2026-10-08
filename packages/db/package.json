@@ -15,9 +15,8 @@
   "scripts": {
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "db:push": "prisma db push",
+    "db:check-drift": "bash scripts/check-drift.sh",
     "db:studio": "prisma studio",
-    "db:seed": "tsx src/seed.ts",
     "build": "prisma generate && tsc",
     "clean": "rm -rf dist"
   },
@@ -26,7 +25,6 @@
     "prisma": "^5.16.0"
   },
   "devDependencies": {
-    "tsx": "^4.15.0",
     "typescript": "^5.5.0"
   }
 }

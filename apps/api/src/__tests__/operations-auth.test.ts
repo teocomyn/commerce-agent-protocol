@@ -16,6 +16,12 @@ describe('operations authentication', () => {
     expect(verifyOperationsToken('too-short')).toBe(false)
   })
 
+  it('rejects the example token from .env.example', () => {
+    process.env.CAP_OPERATIONS_TOKEN = 'change_me_to_a_random_operations_secret'
+    expect(operationsTokenConfigured()).toBe(false)
+    expect(verifyOperationsToken(process.env.CAP_OPERATIONS_TOKEN)).toBe(false)
+  })
+
   it('compares a configured token safely', () => {
     process.env.CAP_OPERATIONS_TOKEN = 'operations-secret-with-at-least-32-characters'
     expect(operationsTokenConfigured()).toBe(true)

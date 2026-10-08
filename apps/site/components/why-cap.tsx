@@ -4,17 +4,17 @@ const points = [
   {
     n: '01',
     title: 'The protocol will exist anyway',
-    body: 'Someone is going to write the layer between agents and merchants. The only question is who, and whether it stays open. Stripe was a neutral party between merchants and banks. CAP is the neutral party between merchants and agents.',
+    body: 'Someone is going to write the layer between agents and merchants. The only question is who, and whether it stays open. Stripe was a neutral party between merchants and banks. CAP aims to be that neutral layer between merchants and agents.',
   },
   {
     n: '02',
     title: 'Agents do not browse, they query',
-    body: 'Today agents scrape HTML and click buttons made for humans. It is slow, fragile, and breaks at every redesign. CAP exposes a real API designed for LLMs: structured data, semantic search, signed transactions.',
+    body: 'Today agents scrape HTML and click buttons made for humans. It is slow, fragile, and breaks at every redesign. CAP exposes a real API designed for LLMs: structured data, semantic search, and checkout creation.',
   },
   {
     n: '03',
-    title: 'Open spec, hosted reference',
-    body: 'The CAP specification is Apache 2.0. Anyone can implement it. The hosted reference SaaS is a service: pay only if you do not want to run it yourself. Like Stripe to ISO 20022.',
+    title: 'Open spec, open reference',
+    body: 'The CAP specification is Apache 2.0. Anyone can implement it. The reference implementation is Apache 2.0 too, and you run it yourself. A hosted version is not available yet.',
   },
 ]
 

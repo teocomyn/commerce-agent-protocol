@@ -1,0 +1,131 @@
+import { z } from 'zod'
+import { EnrichmentOutputSchema, type EnrichmentOutput } from '@cap/shared'
+
+// Strict structured outputs require every key to be required and every object
+// to be closed, so free-form maps are requested as arrays and normalized below.
+export const LlmEnrichmentSchema = z.object({
+  category: z.string(),
+  subcategory: z.string(),
+  specs: z.array(z.object({
+    name: z.string(),
+    value: z.union([z.string(), z.number(), z.boolean()]),
+  })),
+  use_cases: z.array(z.string()),
+  target_audience: z.array(z.string()),
+  care_info: z.string().nullable(),
+  size_guide: z.array(z.object({ size: z.string(), measurements: z.string() })).nullable(),
+  summary: z.string(),
+})
+
+export const LLM_ENRICHMENT_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    category: { type: 'string' },
+    subcategory: { type: 'string' },
+    specs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          value: { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+        },
+        required: ['name', 'value'],
+        additionalProperties: false,
+      },
+    },
+    use_cases: { type: 'array', items: { type: 'string' } },
+    target_audience: { type: 'array', items: { type: 'string' } },
+    care_info: { type: ['string', 'null'] },
+    size_guide: {
+      anyOf: [
+        {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { size: { type: 'string' }, measurements: { type: 'string' } },
+            required: ['size', 'measurements'],
+            additionalProperties: false,
+          },
+        },
+        { type: 'null' },
+      ],
+    },
+    summary: { type: 'string' },
+  },
+  required: [
+    'category', 'subcategory', 'specs', 'use_cases', 'target_audience',
+    'care_info', 'size_guide', 'summary',
+  ],
+  additionalProperties: false,
+}
+
+// Shopper-visible fields must not carry certification, label or environmental
+// claims: those come only from merchant metafields. Anything the model emits
+// that looks like one is dropped, whatever the prompt said.
+const CLAIM_PATTERN = /\b(certifi\w*|label(?:s|l?ed)?|award\w*|eco[- ]?friendly|eco[- ]?responsible|sustainab\w*|carbon[- ]?(neutral|negative|free)|climate[- ]?(neutral|positive)|biodegradable|compostable|organic|fair[- ]?trade|b[- ]?corp|gots|oeko[- ]?tex|vegan|cruelty[- ]?free)\b/i
+
+// Spec names are often snake_case (`eco_label`): separators count as word
+// boundaries so they are matched like plain words.
+export function isClaimLike(value: string | number | boolean): boolean {
+  return typeof value === 'string' && CLAIM_PATTERN.test(value.replace(/[_-]+/g, ' '))
+}
+
+// Free text keeps its other sentences and lines: only the ones carrying a
+// claim go. Lines count as sentences, since care instructions are often a
+// list without terminal punctuation.
+function withoutClaimSentences(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.split(/(?<=[.!?;])\s+/).filter((sentence) => !isClaimLike(sentence)).join(' ').trim())
+    .filter(Boolean)
+    .join('\n')
+}
+
+// A category path keeps its claim-free levels: "Organic > Cotton > T-shirts"
+// becomes "Cotton > T-shirts".
+function withoutClaimLevels(category: string): string {
+  return category.split('>').map((level) => level.trim()).filter((level) => level && !isClaimLike(level)).join(' > ')
+}
+
+// Object.fromEntries keeps the last duplicate; the first occurrence wins here
+// so a repeated name cannot silently replace an earlier, usually better, value.
+function firstEntries<V>(entries: Array<readonly [string, V]>): Record<string, V> {
+  const result: Record<string, V> = {}
+  for (const [key, value] of entries) {
+    if (key.length > 0 && !Object.hasOwn(result, key)) result[key] = value
+  }
+  return result
+}
+
+/**
+ * `fallbackSummary` (the merchant's own product title) replaces a summary
+ * whose only sentence carried a claim, so no product is served or embedded
+ * with an empty summary.
+ */
+export function normalizeLlmEnrichment(
+  output: z.infer<typeof LlmEnrichmentSchema>,
+  fallbackSummary = '',
+): EnrichmentOutput {
+  const specs = firstEntries(output.specs
+    .filter((spec) => !isClaimLike(spec.name) && !isClaimLike(spec.value))
+    .map((spec) => [spec.name.trim(), spec.value] as const))
+  const careInfo = output.care_info ? withoutClaimSentences(output.care_info) : ''
+  const sizeRows = (output.size_guide ?? [])
+    .filter((row) => !isClaimLike(row.size) && !isClaimLike(row.measurements))
+  const sizeGuide = sizeRows.length > 0
+    ? firstEntries(sizeRows.map((row) => [row.size.trim(), row.measurements] as const))
+    : undefined
+  return EnrichmentOutputSchema.parse({
+    category: withoutClaimLevels(output.category) || 'Other',
+    subcategory: isClaimLike(output.subcategory) ? '' : output.subcategory,
+    specs,
+    use_cases: output.use_cases.filter((useCase) => !isClaimLike(useCase)),
+    target_audience: output.target_audience.filter((audience) => !isClaimLike(audience)),
+    ...(careInfo && { care_info: careInfo }),
+    ...(sizeGuide && { size_guide: sizeGuide }),
+    // The summary feeds the embedding: a claim in it would still let agents
+    // match products on certifications the merchant never declared.
+    summary: withoutClaimSentences(output.summary) || fallbackSummary.trim(),
+  })
+}

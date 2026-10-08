@@ -1,12 +1,14 @@
 import crypto from 'node:crypto'
+import { isPlaceholderSecret } from './secrets.js'
 
 export function operationsTokenConfigured(): boolean {
-  return (process.env.CAP_OPERATIONS_TOKEN?.length ?? 0) >= 32
+  const configured = process.env.CAP_OPERATIONS_TOKEN ?? ''
+  return configured.length >= 32 && !isPlaceholderSecret(configured) && new Set(configured).size >= 12
 }
 
 export function verifyOperationsToken(provided: string | undefined): boolean {
   const configured = process.env.CAP_OPERATIONS_TOKEN
-  if (!configured || configured.length < 32 || !provided) return false
+  if (!configured || !operationsTokenConfigured() || !provided) return false
   const expected = Buffer.from(configured)
   const received = Buffer.from(provided)
   return expected.length === received.length && crypto.timingSafeEqual(expected, received)
