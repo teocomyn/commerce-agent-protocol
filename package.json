@@ -27,8 +27,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
-    "prettier": "^3.9.9",
-    "turbo": "^2.11.7",
+    "prettier": "^3.9.10",
+    "turbo": "^2.11.10",
     "typescript": "^5.5.0"
   },
   "engines": {
