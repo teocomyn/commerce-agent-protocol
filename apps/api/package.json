@@ -25,7 +25,7 @@
   "dependencies": {
     "@cap/db": "workspace:*",
     "@cap/shared": "workspace:*",
-    "@hono/node-server": "^1.19.17",
+    "@hono/node-server": "^2.1.3",
     "@hono/zod-validator": "^0.9.1",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@prisma/client": "^5.22.0",
