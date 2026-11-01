@@ -28,7 +28,7 @@ Prototype / unrelated standalone product. No paying user, no adopter, no product
 - `cap-protocol.org` serves an unrelated site titled "CLI Agent Protocol" through Cloudflare (domain registered 2026-05-18 at Namecheap, private WHOIS). Ownership is unconfirmed: do not rely on the domain in artefacts until Teo confirms.
 - No Shopify Partners app has ever been created: `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` are placeholders everywhere, so the OAuth → sync → checkout path has only run against mocked Shopify responses.
 - Secrets live only in provider dashboards and the git-ignored `.env` (`apps/dashboard/.env` is a symlink to it).
-- GitHub `main`: pull request required (0 approvals), required checks "Build & typecheck" and "Analyze JavaScript and TypeScript" (branch up to date), conversation resolution (bot threads count), linear history (squash or rebase), enforced for admins. Private vulnerability reporting (`/security/advisories/new`) is the security contact; there is no email address.
+- GitHub `main`: pull request required (0 approvals), required checks "Build & typecheck" and "Analyze JavaScript and TypeScript" (no up-to-date-branch requirement, so several PRs can land without manual branch updates; `ci.yml` also runs on every push to `main`), conversation resolution (bot threads count), linear history (squash or rebase), enforced for admins. Private vulnerability reporting (`/security/advisories/new`) is the security contact; there is no email address.
 
 ## Commands
 
