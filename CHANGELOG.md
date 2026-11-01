@@ -6,14 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Added
-- N/A
-
-### Changed
-- N/A
-
-### Fixed
-- N/A
+### Security
+- `@hono/node-server` 2.1.5 (GHSA-rmxm-3fg6-px4f, GHSA-9mqv-5hh9-4cgg, GHSA-frvp-7c67-39w9): same public API, the server only uses `serve`. `qs` 6.17.1, `shell-quote` 1.12.0 (GHSA-pqg4-j6r4-53mv, reached through the dev dependency `concurrently`) and `postcss-selector-parser` 6.1.5 (through Tailwind) pinned with pnpm overrides; the previous `qs` 6.16.0 pin was blocking Dependabot's own fix. The `minimatch` alert (ESLint tooling only, no patched 3.x or 10.x release) is dismissed as tolerable risk.
 
 ## [0.2.0-alpha] — 2026-11-01
 
