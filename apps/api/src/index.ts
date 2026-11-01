@@ -13,6 +13,7 @@ import { oauthRouter } from './routes/shopify/oauth.js'
 import { checkReadiness, operationsRouter } from './routes/operations.js'
 import { authMiddleware } from './middleware/auth.js'
 import { assertRuntimeSecrets } from './lib/secrets.js'
+import { publicApiUrl } from './lib/public-url.js'
 import { registerGracefulShutdown } from './lib/shutdown.js'
 import { catalogSyncQueue, deadLetterQueue, enrichmentQueue, maintenanceQueue } from './lib/queue.js'
 import { redis } from './lib/redis.js'
@@ -91,7 +92,7 @@ app.get('/openapi.json', async (c) => {
     },
     servers: [
       {
-        url: process.env.SHOPIFY_APP_URL ?? 'https://api.cap-protocol.org',
+        url: publicApiUrl(),
         description: 'Production',
       },
     ],

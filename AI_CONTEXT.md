@@ -4,7 +4,7 @@ Updated: 2026-11-01
 
 ## Purpose
 
-Open protocol (spec v0.1, Apache-2.0) plus reference implementation that lets AI agents search a merchant catalog, compare products and start a checkout. The shopper always completes payment on the merchant's Shopify checkout; agents never pay.
+Reference implementation (Apache-2.0) that ingests a Shopify catalog, enriches each product into typed attributes, scores how ready it is for AI shopping agents and exposes the result over REST and MCP (`/v1/search`, `/v1/compare`; `/v1/checkout/initiate` is kept for compatibility). Since 2026-11-01 (ADR-0001) CAP is the agent-readiness / catalog-quality layer that feeds UCP, Shopify Catalog, ChatGPT and Gemini; it no longer positions itself as the checkout protocol between agents and merchants.
 
 ## Project classification
 
@@ -24,10 +24,11 @@ Prototype / unrelated standalone product. No paying user, no adopter, no product
 ## Infrastructure
 
 - Render blueprints `render.yaml` (production) and `render.staging.yaml` exist but were never synced: verified on 2026-11-01, `api.cap-protocol.org`, `api-staging.cap-protocol.org`, `dashboard.cap-protocol.org` and `dashboard-staging.cap-protocol.org` have no DNS records, no Render CLI or key is configured on the development machine, and the staging environment is intentionally not created until a pilot merchant exists (paid resources need explicit approval).
-- Vercel project `commerce-agent-protocol-site` (team `t4c2s-projects`, id `prj_KDJojzsG8rOpVYQbnhhL2fvLfrCN`) serves `commerce-agent-protocol-site.vercel.app` from `main`; it is the only deployed component. Dependabot branches create preview deployments.
+- Vercel project `commerce-agent-protocol-site` (team `t4c2s-projects`, id `prj_KDJojzsG8rOpVYQbnhhL2fvLfrCN`) serves `commerce-agent-protocol-site.vercel.app` from `main`; it is the only deployed component. Dependabot branches create preview deployments. The site's public origin comes from `NEXT_PUBLIC_SITE_URL`, else Vercel's `VERCEL_PROJECT_PRODUCTION_URL` (`apps/site/lib/site-url.ts`); set the variable once a domain is confirmed.
 - `cap-protocol.org` serves an unrelated site titled "CLI Agent Protocol" through Cloudflare (domain registered 2026-05-18 at Namecheap, private WHOIS). Ownership is unconfirmed: do not rely on the domain in artefacts until Teo confirms.
 - No Shopify Partners app has ever been created: `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` are placeholders everywhere, so the OAuth → sync → checkout path has only run against mocked Shopify responses.
 - Secrets live only in provider dashboards and the git-ignored `.env` (`apps/dashboard/.env` is a symlink to it).
+- GitHub `main`: pull request required (0 approvals), required checks "Build & typecheck" and "Analyze JavaScript and TypeScript" (branch up to date), conversation resolution (bot threads count), linear history (squash or rebase), enforced for admins. Private vulnerability reporting (`/security/advisories/new`) is the security contact; there is no email address.
 
 ## Commands
 
@@ -62,4 +63,4 @@ Prototype / unrelated standalone product. No paying user, no adopter, no product
 
 ## Current delivery milestone
 
-Security and CI recovery plus the positioning decision, branch `chore/security-ci-positioning-2026-11` (2026-11-01): Next 15.5.28, zod 4, dependency overrides, vitest 4, CodeQL fixes, CHANGELOG 0.2.0-alpha, ADR-0001. Next: merge, tag `v0.2.0-alpha`, first real Shopify dev-store install, Agent Readiness Score v1.
+v0.2.0-alpha released 2026-11-01 (`9f2e9b9`, PR #53: Next 15.5.28, zod 4, dependency overrides, vitest 4, CodeQL fixes, ADR-0001). Current branch `chore/post-release-housekeeping-2026-11`: site origin from env, security contact on GitHub, API fallbacks off the unowned domain. Next: first real Shopify install (Partners app + development store), then Agent Readiness Score v1 and the site copy rewrite. See `AI_HANDOFF.md`.

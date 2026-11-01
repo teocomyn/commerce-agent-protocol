@@ -2,9 +2,10 @@ import type { Metadata, Viewport } from 'next'
 import { GeistSans } from 'geist/font/sans'
 import { GeistMono } from 'geist/font/mono'
 import './globals.css'
+import { SITE_URL } from '@/lib/site-url'
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://cap-protocol.org'),
+  metadataBase: new URL(SITE_URL),
   alternates: { canonical: '/' },
   title: {
     default: 'CAP — Commerce Agent Protocol',
@@ -29,7 +30,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://cap-protocol.org',
+    url: SITE_URL,
     title: 'CAP — Commerce Agent Protocol',
     description:
       'Open protocol for AI agents to search, compare and start checkout on Shopify catalogs. Built in public.',
