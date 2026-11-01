@@ -274,7 +274,7 @@ async function main() {
     data: { revokedAt: new Date() },
   })
 
-  const apiKeyRecord = await prisma.apiKey.create({
+  await prisma.apiKey.create({
     data: {
       merchantId: merchant.id,
       keyHash,
