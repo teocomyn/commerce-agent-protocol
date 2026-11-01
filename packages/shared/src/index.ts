@@ -66,16 +66,30 @@ export function generateApiKey(): { key: string; prefix: string; hash: string } 
   return { key, prefix, hash: '' }
 }
 
-// Utility: strip HTML tags from product descriptions
+// Utility: strip HTML tags from product descriptions.
+// Linear single-pass scanner (no backtracking regex) followed by a single-pass
+// entity decode, so "&amp;lt;" stays "&lt;" instead of being unescaped twice.
+const HTML_ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+}
+
 export function stripHtml(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  let text = ''
+  let inTag = false
+  for (const ch of html) {
+    if (inTag) {
+      if (ch === '>') { inTag = false; text += ' ' }
+      continue
+    }
+    if (ch === '<') { inTag = true; continue }
+    text += ch
+  }
+  const decoded = text.replace(/&(amp|lt|gt|quot|apos|nbsp|#(\d{1,6})|#x([0-9a-fA-F]{1,6}));/g, (m, name: string, dec?: string, hex?: string) => {
+    if (dec) return String.fromCodePoint(Math.min(Number(dec), 0x10ffff))
+    if (hex) return String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff))
+    return HTML_ENTITIES[name] ?? m
+  })
+  return decoded.replace(/\s+/g, ' ').trim()
 }
 
 // Utility: truncate text for embedding

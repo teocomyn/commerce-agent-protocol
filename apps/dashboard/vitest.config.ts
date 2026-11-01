@@ -6,4 +6,7 @@ export default defineConfig({
     // Same alias as tsconfig.json, so route handlers can be imported in tests.
     alias: { '@': fileURLToPath(new URL('.', import.meta.url)) },
   },
+  test: {
+    exclude: ['**/node_modules/**', '**/.next/**', '**/dist/**'],
+  },
 })

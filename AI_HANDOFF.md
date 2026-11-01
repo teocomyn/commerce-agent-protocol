@@ -1,79 +1,52 @@
 # AI Handoff
 
-Updated: 2026-10-08
-Agent/tool: Claude Code (with a sub-agent for apps/dashboard)
-Branch: `main`. PR #34 (P0 hardening), PR #35 (P2 reliability) and PR #36 (P4 platform) are merged (`12dc48b`).
+Updated: 2026-11-01
+Agent/tool: Claude Code
+Branch: `chore/security-ci-positioning-2026-11` (from `main` at `47dcf36`). One PR, merged with the usual auto-merge once "Build & typecheck" and CodeQL pass.
 
-## Status of earlier work
+## Where the project stands (verified 2026-11-01)
 
-- P0 hardening (PR #34), P2 reliability (PR #35) and P4 platform (PR #36) are merged into `main` (2026-10-08).
-- Workflow from now on: every change goes through a PR with GitHub auto-merge (merge commit). The repository has "Allow auto-merge" enabled at the user's request. `main` requires "Build & typecheck" and CodeQL, and branches must be up to date.
+- `main` had not moved since 2026-10-08. The only deployed component is the Vercel marketing site (`commerce-agent-protocol-site.vercel.app`, commit `47dcf36`). No Render service exists, no `api.`/`dashboard.` DNS, no Shopify Partners app (keys are placeholders), no real-store install ever ran.
+- The real working copy is `~/Business/42/42 BUSINESS/Commerce Agent Protocol (CAP)`. The old `~/Downloads/.../Commerce Agent Protocol (CAP)` folder is an empty leftover and should be deleted.
+- `cap-protocol.org` serves an unrelated "CLI Agent Protocol" site (registered 2026-05-18, private WHOIS). Ownership unconfirmed; Teo to clarify.
+- Positioning decided: option A, agent-readiness / catalog-quality layer feeding UCP, Shopify Catalog, ChatGPT and Gemini. See `docs/ADR-0001-positioning-agent-readiness.md` and `AI_CONTEXT.md`.
 
-## P2 reliability (PR #35, merged)
+## What this branch changes
 
-- Graceful shutdown (`apps/api/src/lib/shutdown.ts`) for the API and both workers; Docker images run `node`/Next as PID 1; Render runs `pnpm db:migrate` before every service.
-- API Redis client fails fast (2 s); rate limiting fails open; search cache invalidation is an O(1) per-merchant generation bump.
-- Enrichment pipeline extracted to `apps/api/src/lib/enrichment-pipeline.ts`: LLM/embedding skipped when `source_hash` is unchanged, per-location inventory levels carried over on re-sync, snapshots scheduled after the product row exists, jobs for uninstalled/erased shops skipped.
-- `Idempotency-Key` on checkout (migration `20261008091000_checkout_idempotency`), documented in the spec and served OpenAPI.
-- GDPR: `customers/data_request`, `customers/redact`, `shop/redact` handlers; daily retention job (`apps/api/src/lib/retention.ts`); app uninstall revokes pending invitations and sign-in links.
-- Dashboard: per-account + per-IP login limits, session revocation by membership version, scrypt parameters stored in hashes with rehash-on-login, zod validation and correct status codes on all API routes, error messages in the UI, role-based controls, TypeScript strict mode.
-- Docs: OPERATIONS (retention, GDPR, shutdown, deploys), SHOPIFY_E2E, DASHBOARD_AUTH, README, CHANGELOG, `.env.example`.
+- **Security**: Next.js 15.5.28 on `apps/site` and `apps/dashboard` (GHSA-2464-fhr4-w9xw unauthenticated image-optimizer RCE, GHSA-p3m5-59mp-jv5r DoS; the live site ran 15.5.27 and its `/_next/image` route answered). zod 4.6.7 in api, dashboard, shared (GHSA-mrhx-c7xc-m3w5; no 3.x fix). pnpm overrides `body-parser` 2.4.0, `fast-uri@3` 3.1.9, `ip-address` 10.7.5. `@modelcontextprotocol/sdk` 1.32.2.
+- **zod 4 migration**: `z.string().uuid()` → `z.guid()` (3 sites in `packages/shared`); `error.flatten()` → `z.flattenError()` in `apps/api/src/lib/validation.ts` and `apps/api/src/mcp/tools.ts`; MCP input schemas via native `z.toJSONSchema(schema, { target: 'draft-7', io: 'input' })`; direct `zod-to-json-schema` dependency removed. `z.record` calls given an explicit key schema.
+- **CodeQL**: `stripHtml` rewritten as a linear scanner + single-pass entity decode (closes polynomial-redos and double-escaping alerts); seed script variable renamed so the DB record is not confused with the secret (clear-text-logging alert); alert #5 (SHA-256 of a 160-bit API key) dismissed as false positive with justification.
+- **Tests**: vitest 4.1.12 with vite 7.3.7 (Dependabot's vitest 4 PR failed because the lockfile kept vite 5, which has no `./module-runner` export); `**/dist/**` excluded from collection in both vitest configs.
+- **Docs**: CHANGELOG cut as `0.2.0-alpha` (2026-11-01) with today's entries and corrected compare links; ADR-0001; `AI_CONTEXT.md` facts and decisions; README positioning.
 
-## Review rounds (2026-10-08)
+## Validation (local, 2026-11-01)
 
-- PR #34: 57 review threads fixed and resolved (latest: `024d7db`). This includes:
-  - dashboard origins from `DASHBOARD_URL`, which fail closed and are validated at boot in production;
-  - the owner confirmation bound to the merchant it displays;
-  - invitation viewer states;
-  - claim filtering of `care_info` and `summary`;
-  - the guessability check for canonical and previous keys;
-  - compare-and-set in `reencrypt-tokens`;
-  - catalog sync: inactive products only update their status;
-  - resync deduplication per shop.
-- PR #35 (this branch, `chore/p2-reliability`): P0 merged in (`9f7f11f`):
-  - the Storefront token is decrypted before the checkout row exists;
-  - `ENRICHMENT_VERSION` is bumped to `2026-10-08.2`;
-  - the `shopify_updated_at` guard is now atomic with the raw product write (`bce3e11`).
-  - All 35 threads are resolved.
+Run in the real working copy against Docker `cap_postgres` (pgvector 16) and `cap_redis`, after `pnpm db:migrate` (the local volume was at the April schema):
 
-## Validation
-
-- `chore/p2-reliability` at `bce3e11`, run against pgvector Postgres and Redis in throwaway Docker containers:
-  - API: 124 tests. Dashboard: 71 tests.
-  - Lint, build, `pnpm audit --prod` and the drift check pass.
-- `chore/p0-hardening` at `024d7db`: API 103 tests and dashboard 32 tests; the same checks pass.
-- Compiled API and both workers exit 0 on SIGTERM after draining.
-- Not exercised at runtime: dashboard flows with a real signed-in session (unit-tested pure functions only), real OpenAI/Shopify calls.
+- `pnpm audit --prod --audit-level high`: exit 0 (2 moderate remain, dev-only).
+- `pnpm db:check-drift`: "schema.prisma matches the migrations" (needs `DATABASE_URL` exported; the script does not read `.env`).
+- `pnpm typecheck`, `pnpm lint`: 4/4 tasks green.
+- `pnpm test`: API 10 files / 133 tests passed; dashboard 9 files / 85 tests passed.
+- `pnpm build`: 5/5 tasks green (site first-load JS 154 kB unchanged).
+- Not exercised: real OpenAI or Shopify calls; the Vercel deploy of 15.5.28 happens on merge.
 
 ## Behaviour changes to announce
 
-- Every dashboard user signs in once more after deploy (old cookies have no membership version).
-- 10 failed logins per account per 15 minutes lock that account for up to 15 minutes, whoever makes them.
-- Re-running a full catalog sync is now cheap: unchanged products skip OpenAI.
+- Ids are accepted in any 8-4-4-4-12 hex form (`z.guid()`), matching Postgres; previously zod 3 did the same, zod 4's `uuid()` would have rejected non-version-checked ids.
+- MCP `tools/list` input schemas are now draft-07 documents produced by zod itself; `type`, `properties`, `required` are unchanged for the three tools, `additionalProperties: false` is now explicit.
+- Validation error `details` keep the `{ formErrors, fieldErrors }` shape.
 
 ## Blockers and decisions needed
 
-- Configure the three Shopify compliance topics in the app settings before an App Store submission; legal review of erasure.
-- Email verification for invitations and an error-tracking vendor need product/billing decisions.
-- Strategic positioning vs UCP/ACP (P1).
+- Confirm who owns `cap-protocol.org`; until then it stays referenced only in docs and blueprints that are not deployed.
+- `openai` 4.104 → 7.x is a separate major bump (zod helpers are not used, so nothing breaks today).
+- Branch protection: after this merge, enable "Require a pull request before merging" (0 approvals) and `enforce_admins` so direct pushes to `main` stop.
 
-## P4 platform (PR #36, merged)
+## Next concrete actions
 
-- Docker images: two-stage builds, runtime holds production dependencies only and runs as `node`; base pinned by version and digest (API 1.56 GB → 529 MB, dashboard 1.64 GB → 725 MB). Verified locally: migrations as `node`, API `/ready`, worker drain on SIGTERM, dashboard pages with Prisma.
-- CI: runs on every PR (stacked ones too), actions pinned by SHA, job timeouts, `/ready` + `/openapi.json` smoke test, Docker image build job that checks the image is non-root; Dependabot watches the Docker base image.
-- Migration `20261008160000_foreign_key_indexes`: indexes on the 7 foreign keys that had none.
-- Dashboard route tests: session, role and merchant scoping on the keys and team routes, and the cross-origin rejection on every mutating route (login, invitation acceptance, logout and owner sign-in included). Login and invitation logic keep their own unit tests.
-- Site: no button inside a link, canonical URL, particles and globe lazy-loaded and still under reduced motion (first-load JS 200 kB → 154 kB).
-
-## Shared commerce services (PR #42, merged)
-
-- `apps/api/src/services/` holds search, compare and checkout. The REST routes and the MCP tools both call them: same validation (MCP tool schemas are generated from the shared zod schemas), visibility rules, errors, search cache, agent-query logging and idempotency (`commerce_checkout` takes `idempotency_key`).
-- MCP tools take the REST request bodies and return the REST response bodies. Breaking for MCP clients: search filters are under `filters`.
-- Remote MCP (PR #45): `/mcp` on the API serves the same tools over stateless Streamable HTTP, authenticated with the API key (`Authorization: Bearer` or `X-CAP-Key`). OAuth for web connectors (Claude.ai, ChatGPT) is the next step on this layer.
-- Dependencies: Dependabot updates applied in PR #43; Node majors are no longer proposed for the Docker base (stay on 22 LTS).
-
-## Next concrete action
-
-- Deploy `main` (Render blueprint + Vercel), then check `/ready`, the dashboard sign-in and one Shopify install on staging.
-- Then the open decisions above: strategic positioning vs UCP/ACP (P1: A, a GEO/catalog-quality layer that feeds UCP and ACP, recommended in AI_CONTEXT.md; or B, UCP/ACP adapters for non-Shopify stores), Sentry or another error tracker, and email delivery for invitations.
-- No manual resync is needed after deploying. The catalog worker re-enriches every active shop automatically, 10 minutes after starting, because `ENRICHMENT_VERSION` changed. This sets `shopify_updated_at` and re-applies claim filtering.
+1. Merge this PR (Vercel redeploys the site on Next 15.5.28), then `git tag v0.2.0-alpha` on the merge commit and publish a GitHub release from the CHANGELOG section.
+2. Delete merged branches (`chore/p0-hardening`, `chore/p2-reliability`, `chore/p4-platform`, `chore/deps-2026-10-08`, `docs/handoff-after-merge`, `feat/remote-mcp`, `feat/shared-commerce-services`); Dependabot PRs #31, #48, #49 are superseded by this PR.
+3. First real Shopify install: create a Partners app + development store, run OAuth → sync locally through ngrok, compare `/v1/search` with the store's own `https://{store}/api/ucp/mcp`. This is the gap study that defines the readiness product.
+4. Agent Readiness Score v1: publish the weights of `computeGeoScore`, add per-attribute "why / how to fix" output, calibrate on 20–50 public catalogs via the Shopify Catalog API, then surface it in the dashboard and as a free URL-only audit (PDF).
+5. Retire checkout / remote-MCP / "neutral protocol" claims from the site copy; keep the code until replaced.
+6. No Render or staging resources until a pilot merchant exists; explicit approval before any paid creation.

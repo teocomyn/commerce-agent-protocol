@@ -1,8 +1,8 @@
 <h1 align="center">Commerce Agent Protocol</h1>
 
 <p align="center">
-  <strong>Open protocol connecting e-commerce catalogs to AI shopping agents.</strong><br/>
-  The Stripe of agent commerce — neutral middleware between merchants and Claude / ChatGPT / Perplexity / Operator.
+  <strong>Make your catalog readable, rankable and buyable by AI shopping agents.</strong><br/>
+  Agent-readiness scoring and catalog quality for UCP, Shopify Catalog, ChatGPT and Gemini. Open source, Apache-2.0.
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@ Today, when an AI agent wants to buy something for a human, it scrapes HTML, gue
 
 **CAP fixes that.** It's a neutral, open layer — not owned by Shopify, Google, or OpenAI — that lets a merchant expose an agent-readable catalog and lets agents search, compare and start a checkout through an authenticated API. The shopper still completes payment on the merchant's checkout. The spec and the reference implementation are free (Apache-2.0); Shopify is the only supported platform today.
 
-> If this protocol is going to exist anyway, the question is: *who writes it before the giants do.*
+> Since v0.2 CAP no longer tries to be the checkout protocol: Shopify now ships a UCP MCP per store and Google, OpenAI and Stripe own the rails. CAP measures and fixes what those rails read. See [ADR-0001](./docs/ADR-0001-positioning-agent-readiness.md).
 
 ---
 
@@ -143,7 +143,7 @@ stdout carries only JSON-RPC frames; logs go to stderr. Keep `--silent` and `-C`
 
 ## Status
 
-CAP is **alpha (v0.1)**. The catalog + search + checkout loop works end-to-end against a real Shopify store; the open spec is being formalized in [`cap-spec/`](./cap-spec). Breaking changes are expected before v1.0.
+CAP is **alpha (v0.2.0-alpha, 2026-11-01)**. The ingestion, enrichment, scoring, search and checkout code runs end-to-end in tests and locally; nothing is deployed besides this site and no real merchant store has been connected yet. The project is pivoting to an agent-readiness score and catalog-quality tooling ([ADR-0001](./docs/ADR-0001-positioning-agent-readiness.md)); the `/v1/checkout/initiate` endpoint, the remote MCP server and [`cap-spec/`](./cap-spec) remain in the tree but are no longer the product promise. Breaking changes are expected before v1.0.
 
 See the [CHANGELOG](./CHANGELOG.md) for the full release history.
 

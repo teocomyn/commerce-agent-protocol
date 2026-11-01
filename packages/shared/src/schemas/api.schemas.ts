@@ -31,7 +31,7 @@ export type SearchFilters = z.infer<typeof SearchFiltersSchema>
 // COMPARE API
 // ============================================================
 export const CompareRequestSchema = z.object({
-  product_ids: z.array(z.string().uuid()).min(2).max(10).describe('2-10 product ids returned by a search'),
+  product_ids: z.array(z.guid()).min(2).max(10).describe('2-10 product ids returned by a search'),
   criteria: z.array(z.enum(['price', 'certifications', 'shipping', 'specs', 'return_policy'])).optional().default(['price', 'certifications', 'shipping', 'specs']),
 })
 
@@ -41,13 +41,13 @@ export type CompareRequest = z.infer<typeof CompareRequestSchema>
 // CHECKOUT API
 // ============================================================
 export const CheckoutInitiateSchema = z.object({
-  product_id: z.string().uuid().describe('Product id returned by a search'),
+  product_id: z.guid().describe('Product id returned by a search'),
   variant_id: z.string().optional().describe('Variant id (size, color…) from the search result; default: first purchasable variant'),
   quantity: z.number().int().min(1).max(99).default(1),
   shipping_country: z.string().regex(/^[A-Za-z]{2}$/).transform((value) => value.toUpperCase()).optional().default('FR')
     .describe('ISO 3166-1 alpha-2 country to ship to'),
   /** UUID returned as `agent_query_id` from POST /v1/search — links checkout analytics to the search */
-  agent_session_id: z.string().uuid().optional()
+  agent_session_id: z.guid().optional()
     .describe('agent_query_id returned by the search that led to this checkout'),
 })
 
@@ -126,11 +126,11 @@ export interface CompareResponse {
 export const EnrichmentOutputSchema = z.object({
   category: z.string().describe('Product category in format "MainCategory > SubCategory"'),
   subcategory: z.string().describe('Specific subcategory'),
-  specs: z.record(z.union([z.string(), z.number(), z.boolean()])).describe('Structured product specifications'),
+  specs: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).describe('Structured product specifications'),
   use_cases: z.array(z.string()).describe('List of use cases for this product'),
   target_audience: z.array(z.string()).describe('Target audience descriptors (gender, age, lifestyle)'),
   care_info: z.string().optional().describe('Care instructions'),
-  size_guide: z.record(z.string()).optional().describe('Size guide if applicable'),
+  size_guide: z.record(z.string(), z.string()).optional().describe('Size guide if applicable'),
   summary: z.string().describe('One sentence agent-optimized product summary'),
 })
 
