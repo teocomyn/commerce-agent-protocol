@@ -126,4 +126,12 @@ describe('shared CAP schemas and utilities', () => {
   it('decodes common HTML entities and whitespace', () => {
     expect(stripHtml(' <b>A</b> &lt; B &gt; C&nbsp;&nbsp; ')).toBe('A < B > C')
   })
+
+  it('keeps text after an unmatched "<" and replaces invalid numeric entities', () => {
+    expect(stripHtml('a <b>b</b> c < d')).toBe('a b c < d')
+    expect(stripHtml('Price <10')).toBe('Price <10')
+    expect(stripHtml('&#65;&#x42;&#128512;')).toBe('AB\u{1F600}')
+    expect(stripHtml('&#xD800; &#1114112; &#0;')).toBe('\uFFFD \uFFFD \uFFFD')
+    expect(stripHtml('&amp;lt;')).toBe('&lt;')
+  })
 })

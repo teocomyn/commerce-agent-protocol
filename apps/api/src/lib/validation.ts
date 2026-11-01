@@ -1,5 +1,5 @@
 import { zValidator } from '@hono/zod-validator'
-import type { ZodType } from 'zod'
+import { z, type ZodType } from 'zod'
 
 export function capJsonValidator<T extends ZodType>(schema: T) {
   return zValidator('json', schema, (result, c) => {
@@ -8,7 +8,7 @@ export function capJsonValidator<T extends ZodType>(schema: T) {
         error: {
           code: 'VALIDATION_ERROR',
           message: 'Request body validation failed',
-          details: result.error.flatten(),
+          details: z.flattenError(result.error),
         },
       }, 400)
     }

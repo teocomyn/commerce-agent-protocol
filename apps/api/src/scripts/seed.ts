@@ -274,7 +274,7 @@ async function main() {
     data: { revokedAt: new Date() },
   })
 
-  const apiKey = await prisma.apiKey.create({
+  await prisma.apiKey.create({
     data: {
       merchantId: merchant.id,
       keyHash,
@@ -282,7 +282,7 @@ async function main() {
       label: 'demo-seed',
     },
   })
-  console.log(`  ✓ API key: ${apiKey.id}`)
+  console.log('  ✓ Demo API key stored (hash only)')
 
   // ============================================================
   // 3. Products + embeddings

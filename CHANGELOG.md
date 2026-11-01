@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- N/A
+
+### Changed
+- N/A
+
+### Fixed
+- N/A
+
+## [0.2.0-alpha] — 2026-11-01
+
+### Added
 - Signed dashboard accounts with invitations and merchant roles.
 - Authoritative Shopify inventory snapshots with per-location quantities.
 - Shopify shipping and refund policy URLs in search and comparison responses.
@@ -19,6 +30,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Compare responses list the compared products (`comparison.products`, id and title).
 
 ### Changed
+- Product and session ids are validated with `z.guid()` (any RFC 9562 8-4-4-4-12 form, which is what the Postgres `uuid` columns accept) instead of zod 4's stricter version-checked `uuid()`.
+- MCP tool input schemas are generated with zod's native `z.toJSONSchema` (draft-07, input types); the direct `zod-to-json-schema` dependency is gone.
+- vitest 4.1 with vite 7 for both test suites; compiled `dist/` copies of the tests are excluded from collection.
 - The MCP tools and the REST endpoints run the same services: the tools take the REST request bodies as arguments (published as JSON Schema from the same zod schemas) and return the REST response bodies, with the same validation, visibility rules, error codes, search cache and agent-query logging. **Breaking for MCP clients:** search filters move under `filters` (`{"query": "…", "filters": {"price_max": 120}}`), and results use the REST search format.
 - Catalog synchronization uses Shopify Admin GraphQL `2026-07` and asynchronously backfills inventory locations.
 - Checkout and search availability now honor untracked inventory and Shopify's `CONTINUE` selling policy.
@@ -32,6 +46,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The API Redis client fails fast during an outage; rate limiting fails open and `/ready` reports the outage.
 
 ### Fixed
+- The seed script logs the database id of the demo API key record under an unambiguous name.
 - Inventory webhooks no longer replace total stock with a single location's quantity.
 - Enrichment requests a JSON schema that OpenAI strict structured outputs accepts (closed objects, every key required); the previous schema used open maps and optional keys.
 - The stdio MCP server writes only JSON-RPC frames to stdout; logs go to stderr. New entrypoint `pnpm --silent -C apps/api mcp`.
@@ -41,11 +56,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Jobs for an uninstalled or erased shop are skipped instead of retried.
 
 ### Security
+- Next.js 15.5.28 on the site and the dashboard: closes GHSA-2464-fhr4-w9xw (unauthenticated RCE in the Image Optimization API) and GHSA-p3m5-59mp-jv5r (Server Actions DoS). The deployed site was running 15.5.27.
+- zod 4.6.7 everywhere (GHSA-mrhx-c7xc-m3w5, memory exhaustion on oversized constrained inputs; no fix exists on the 3.x line). `body-parser` 2.4.0, `fast-uri` 3.1.9 and `ip-address` 10.7.5 pinned through pnpm overrides; `pnpm audit --prod --audit-level high` is clean again and the daily Dependabot security job no longer fails on the old `fast-uri` pin.
+- `stripHtml` is a linear single-pass scanner followed by a single-pass entity decode: no backtracking regex on merchant HTML, and `&amp;lt;` is no longer unescaped twice.
 - The API, workers, MCP server and dashboard refuse to start with the `.env.example` values of `ENCRYPTION_KEY`, `CAP_OPERATIONS_TOKEN` and `DASHBOARD_SESSION_SECRET`, or with trivially guessable values; in production the Shopify app secret must also be set. Production requires a 32-byte `ENCRYPTION_KEY` (hex or base64); new tokens use the `v2:` ciphertext format, `ENCRYPTION_KEY_PREVIOUS` supports rotation, and `pnpm --filter @cap/api reencrypt-tokens` re-encrypts stored tokens.
 - Invitation acceptance no longer verifies passwords of existing accounts (it requires a session of the invited user instead) and is rate limited per IP and per invitation.
 - Owner sign-in after Shopify OAuth goes through a same-origin confirmation step, closing login CSRF.
 - Uninstalling the app revokes pending invitations and unused sign-in links.
-- Dependency updates clearing every `pnpm audit --prod` finding (3 critical, 9 high): Next.js 15.5.27, MCP SDK 1.32.1, Hono 4.13.13, and patched `sharp`, `fast-uri`, `proxy-addr`, `qs`, `ip-address`, `postcss`, `source-map-js` overrides.
+- Dependency updates clearing every `pnpm audit --prod` finding (3 critical, 9 high): Hono 4.13.13, `@modelcontextprotocol/sdk` 1.32.2, and patched `sharp`, `proxy-addr`, `qs`, `postcss`, `source-map-js` overrides. Next.js, `fast-uri` and `ip-address` are covered by the entries above.
 - Dashboard sends CSP `frame-ancestors 'none'`, HSTS (production), `nosniff`, referrer and permissions policies; the unused `/api/cap` proxy is removed.
 
 ### Protocol
@@ -57,7 +75,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `db:push` scripts: schema changes ship as migrations, and CI checks that `schema.prisma` matches them (`pnpm db:check-drift`).
 - Unsupported claims on the marketing site (signed transactions, multi-vendor federation, latency figures, adoption, fraud detection).
 
-## [0.1.0] — 2026-04-30
+## [0.1.0-alpha] — 2026-04-30
 
 First public alpha release of the Commerce Agent Protocol reference implementation.
 
@@ -97,5 +115,6 @@ First public alpha release of the Commerce Agent Protocol reference implementati
 
 Alpha. Breaking changes expected before `v1.0`. Catalog → search → checkout end-to-end works against a real Shopify store; payment is delegated to Shopify checkout.
 
-[Unreleased]: https://github.com/teocomyn/commerce-agent-protocol/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/teocomyn/commerce-agent-protocol/releases/tag/v0.1.0
+[Unreleased]: https://github.com/teocomyn/commerce-agent-protocol/compare/v0.2.0-alpha...HEAD
+[0.2.0-alpha]: https://github.com/teocomyn/commerce-agent-protocol/compare/v0.1.0-alpha...v0.2.0-alpha
+[0.1.0-alpha]: https://github.com/teocomyn/commerce-agent-protocol/releases/tag/v0.1.0-alpha

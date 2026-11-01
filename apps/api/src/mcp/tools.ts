@@ -1,5 +1,4 @@
 import { z, type ZodTypeAny } from 'zod'
-import { zodToJsonSchema } from 'zod-to-json-schema'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { CheckoutInitiateSchema, CompareRequestSchema, SearchRequestSchema } from '@cap/shared'
 import type { CapOutcome } from '../services/outcome.js'
@@ -61,7 +60,7 @@ const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
 export const COMMERCE_TOOLS: Tool[] = Object.entries(TOOL_DEFINITIONS).map(([name, definition]) => ({
   name,
   description: definition.description,
-  inputSchema: zodToJsonSchema(definition.schema, { $refStrategy: 'none' }) as Tool['inputSchema'],
+  inputSchema: z.toJSONSchema(definition.schema, { target: 'draft-7', io: 'input' }) as Tool['inputSchema'],
 }))
 
 /**
@@ -85,7 +84,7 @@ export async function callCommerceTool(
         error: {
           code: 'VALIDATION_ERROR',
           message: 'Tool arguments validation failed',
-          details: parsed.error.flatten(),
+          details: z.flattenError(parsed.error),
         },
       },
     }
