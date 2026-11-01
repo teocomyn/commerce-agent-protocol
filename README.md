@@ -169,7 +169,7 @@ To report a security vulnerability, see [SECURITY.md](./SECURITY.md).
 
 - **Discussions** — [GitHub Discussions](https://github.com/teocomyn/commerce-agent-protocol/discussions)
 - **Issues** — [GitHub Issues](https://github.com/teocomyn/commerce-agent-protocol/issues)
-- **Security** — security@cap-protocol.org (private disclosure)
+- **Security** — [private vulnerability report](https://github.com/teocomyn/commerce-agent-protocol/security/advisories/new), see [SECURITY.md](./SECURITY.md)
 
 ---
 

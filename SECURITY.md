@@ -2,9 +2,9 @@
 
 ## Reporting a vulnerability
 
-If you discover a security vulnerability in CAP, please **do not open a public GitHub issue**. Instead, email:
+If you discover a security vulnerability in CAP, please **do not open a public GitHub issue**. Use GitHub's private vulnerability reporting instead:
 
-**security@cap-protocol.org**
+**[Report a vulnerability](https://github.com/teocomyn/commerce-agent-protocol/security/advisories/new)** (visible only to the maintainers; you can attach files and a suggested fix).
 
 You can expect:
 
@@ -12,7 +12,7 @@ You can expect:
 - An initial assessment within **5 business days**
 - A coordinated disclosure timeline once the impact is understood
 
-If you'd like to encrypt your report, request our PGP key in your first message.
+If you need to share something you would rather not put in the advisory, ask for a PGP key in the advisory thread.
 
 ## In scope
 

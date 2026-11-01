@@ -111,7 +111,7 @@ export default function ApiKeysClient({ keys, merchantDomain, role }: ApiKeysCli
             display: 'block',
           }}
         >
-          {`curl -X POST https://api.cap-protocol.org/v1/search \\
+          {`curl -X POST ${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'}/v1/search \\
   -H "X-CAP-Key: cap_live_your_key_here" \\
   -d '{"query": "white sneakers", "filters": {"price_max": 120}}'`}
         </code>

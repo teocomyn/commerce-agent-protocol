@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import { prisma } from '@cap/db'
 import type { SearchRequest, SearchResponse } from '@cap/shared'
 import { cacheGet, cacheSet, searchCacheKey } from '../lib/redis.js'
+import { publicApiUrl } from '../lib/public-url.js'
 import { isVariantPurchasable } from '../lib/inventory.js'
 
 const openai = new OpenAI({
@@ -267,7 +268,7 @@ export async function searchCatalog(request: SearchRequest, context: SearchConte
   )
 
   const total = rawResults.length > 0 ? parseInt(rawResults[0]?.total_count ?? '0') : 0
-  const checkoutBase = process.env.SHOPIFY_APP_URL ?? 'https://api.cap-protocol.org'
+  const checkoutBase = publicApiUrl()
 
   // Format results
   const results = rawResults.map(row => {
