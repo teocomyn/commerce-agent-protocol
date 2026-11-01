@@ -37,11 +37,17 @@ updates:
         update-types: ["version-update:semver-major"]
 
   # GitHub Actions move slowly; monthly is enough. Actions are pinned by commit
-  # SHA (with the version in a comment); Dependabot updates both.
+  # SHA (with the version in a comment); Dependabot updates both. One grouped PR:
+  # codeql-action init and analyze must move together (a version mismatch fails
+  # the Analyze job), and one PR per action is noise.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: monthly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
     labels:
       - dependencies
       - github-actions

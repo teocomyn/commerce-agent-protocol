@@ -63,4 +63,4 @@ Prototype / unrelated standalone product. No paying user, no adopter, no product
 
 ## Current delivery milestone
 
-v0.2.0-alpha released 2026-11-01 (`9f2e9b9`, PR #53: Next 15.5.28, zod 4, dependency overrides, vitest 4, CodeQL fixes, ADR-0001). Current branch `chore/post-release-housekeeping-2026-11`: site origin from env, security contact on GitHub, API fallbacks off the unowned domain. Next: first real Shopify install (Partners app + development store), then Agent Readiness Score v1 and the site copy rewrite. See `AI_HANDOFF.md`.
+v0.2.0-alpha released 2026-11-01 (`9f2e9b9`, PR #53: Next 15.5.28, zod 4, dependency overrides, vitest 4, CodeQL fixes, ADR-0001). Same day: #55 (site origin from env, security contact on GitHub, API fallbacks off the unowned domain) and #57 (`@hono/node-server` 2.1.5, `qs`, `shell-quote`, `postcss-selector-parser`; `pnpm audit --prod` clean) merged; `chore/actions-bumps-grouped-2026-11` bumps the GitHub Actions and groups their Dependabot updates. Next: first real Shopify install (Partners app + development store), then Agent Readiness Score v1 and the site copy rewrite. See `AI_HANDOFF.md`.
