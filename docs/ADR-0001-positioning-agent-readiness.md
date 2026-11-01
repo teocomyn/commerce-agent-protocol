@@ -33,9 +33,9 @@ Kept: `apps/api` ingestion and enrichment, `packages/shared` scoring, `apps/dash
 
 Retired as product promises (code stays until replaced, but is no longer the pitch): `POST /v1/checkout/initiate` as a merchant-facing feature, the remote MCP server as a product, `cap-spec` as a standard for others to implement. OAuth for Claude.ai connectors, Ed25519 request signing, negotiation, reservation and federation are dropped from the roadmap.
 
-Infrastructure: no staging environment and no Render services until the readiness product has a pilot merchant; a single API + dashboard deployment is enough and requires explicit approval before creating paid resources.
+Infrastructure: no staging environment and no Render services until the readiness product has a pilot merchant. One environment running the API, the dashboard and the two BullMQ workers (catalog sync, enrichment) is enough, and creating it requires explicit approval because it is paid.
 
-Messaging: the README and the site drop "the Stripe of agent commerce" and any claim that CAP is the neutral protocol between merchants and agents.
+Messaging: the README drops "the Stripe of agent commerce" and any claim that CAP is the neutral protocol between merchants and agents with this ADR. The marketing site (`apps/site`) still carries the protocol and checkout copy; rewriting it is a follow-up tracked in `AI_HANDOFF.md`.
 
 ## Alternatives considered
 

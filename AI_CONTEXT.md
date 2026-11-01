@@ -23,7 +23,7 @@ Prototype / unrelated standalone product. No paying user, no adopter, no product
 
 ## Infrastructure
 
-- Render blueprints `render.yaml` (production) and `render.staging.yaml` exist but were never synced: verified on 2026-11-01, `api.`, `api-staging.`, `dashboard.` and `dashboard-staging.cap-protocol.org` have no DNS records, no Render CLI or key is configured on the development machine, and the staging environment is intentionally not created until a pilot merchant exists (paid resources need explicit approval).
+- Render blueprints `render.yaml` (production) and `render.staging.yaml` exist but were never synced: verified on 2026-11-01, `api.cap-protocol.org`, `api-staging.cap-protocol.org`, `dashboard.cap-protocol.org` and `dashboard-staging.cap-protocol.org` have no DNS records, no Render CLI or key is configured on the development machine, and the staging environment is intentionally not created until a pilot merchant exists (paid resources need explicit approval).
 - Vercel project `commerce-agent-protocol-site` (team `t4c2s-projects`, id `prj_KDJojzsG8rOpVYQbnhhL2fvLfrCN`) serves `commerce-agent-protocol-site.vercel.app` from `main`; it is the only deployed component. Dependabot branches create preview deployments.
 - `cap-protocol.org` serves an unrelated site titled "CLI Agent Protocol" through Cloudflare (domain registered 2026-05-18 at Namecheap, private WHOIS). Ownership is unconfirmed: do not rely on the domain in artefacts until Teo confirms.
 - No Shopify Partners app has ever been created: `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` are placeholders everywhere, so the OAuth → sync → checkout path has only run against mocked Shopify responses.

@@ -75,21 +75,31 @@ const HTML_ENTITIES: Record<string, string> = {
 
 export function stripHtml(html: string): string {
   let text = ''
-  let inTag = false
-  for (const ch of html) {
-    if (inTag) {
-      if (ch === '>') { inTag = false; text += ' ' }
+  let tagStart = -1
+  for (let i = 0; i < html.length; i++) {
+    const ch = html[i]
+    if (tagStart >= 0) {
+      if (ch === '>') { tagStart = -1; text += ' ' }
       continue
     }
-    if (ch === '<') { inTag = true; continue }
+    if (ch === '<') { tagStart = i; continue }
     text += ch
   }
-  const decoded = text.replace(/&(amp|lt|gt|quot|apos|nbsp|#(\d{1,6})|#x([0-9a-fA-F]{1,6}));/g, (m, name: string, dec?: string, hex?: string) => {
-    if (dec) return String.fromCodePoint(Math.min(Number(dec), 0x10ffff))
-    if (hex) return String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff))
+  // A "<" that is never closed is text, not a tag: keep everything after it.
+  if (tagStart >= 0) text += html.slice(tagStart)
+  const decoded = text.replace(/&(amp|lt|gt|quot|apos|nbsp|#(\d{1,7})|#x([0-9a-fA-F]{1,6}));/g, (m, name: string, dec?: string, hex?: string) => {
+    if (dec !== undefined) return codePointToText(Number(dec))
+    if (hex !== undefined) return codePointToText(parseInt(hex, 16))
     return HTML_ENTITIES[name] ?? m
   })
   return decoded.replace(/\s+/g, ' ').trim()
+}
+
+// Invalid code points (NUL, surrogates, beyond U+10FFFF) become U+FFFD instead of throwing or being clamped.
+function codePointToText(codePoint: number): string {
+  if (!Number.isInteger(codePoint) || codePoint <= 0 || codePoint > 0x10ffff) return '\uFFFD'
+  if (codePoint >= 0xd800 && codePoint <= 0xdfff) return '\uFFFD'
+  return String.fromCodePoint(codePoint)
 }
 
 // Utility: truncate text for embedding

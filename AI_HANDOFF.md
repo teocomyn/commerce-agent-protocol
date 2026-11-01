@@ -2,11 +2,11 @@
 
 Updated: 2026-11-01
 Agent/tool: Claude Code
-Branch: `chore/security-ci-positioning-2026-11` (from `main` at `47dcf36`). One PR, merged with the usual auto-merge once "Build & typecheck" and CodeQL pass.
+Branch: `chore/security-ci-positioning-2026-11` (from `main` at `47dcf36`). One PR (#53), auto-merge enabled; it merges once "Build & typecheck" and CodeQL pass and every review thread is resolved (`main` requires conversation resolution and linear history).
 
 ## Where the project stands (verified 2026-11-01)
 
-- `main` had not moved since 2026-10-08. The only deployed component is the Vercel marketing site (`commerce-agent-protocol-site.vercel.app`, commit `47dcf36`). No Render service exists, no `api.`/`dashboard.` DNS, no Shopify Partners app (keys are placeholders), no real-store install ever ran.
+- `main` had not moved since 2026-10-08. The only deployed component is the Vercel marketing site (`commerce-agent-protocol-site.vercel.app`, commit `47dcf36`). No Render service exists, no DNS for `api.cap-protocol.org` or `dashboard.cap-protocol.org`, no Shopify Partners app (keys are placeholders), no real-store install ever ran.
 - The real working copy is `~/Business/42/42 BUSINESS/Commerce Agent Protocol (CAP)`. The old `~/Downloads/.../Commerce Agent Protocol (CAP)` folder is an empty leftover and should be deleted.
 - `cap-protocol.org` serves an unrelated "CLI Agent Protocol" site (registered 2026-05-18, private WHOIS). Ownership unconfirmed; Teo to clarify.
 - Positioning decided: option A, agent-readiness / catalog-quality layer feeding UCP, Shopify Catalog, ChatGPT and Gemini. See `docs/ADR-0001-positioning-agent-readiness.md` and `AI_CONTEXT.md`.
@@ -38,7 +38,7 @@ Run in the real working copy against Docker `cap_postgres` (pgvector 16) and `ca
 
 ## Blockers and decisions needed
 
-- Confirm who owns `cap-protocol.org`; until then it stays referenced only in docs and blueprints that are not deployed.
+- Confirm who owns `cap-protocol.org`. It is referenced today in docs and the Render blueprints (not deployed), as the `SHOPIFY_APP_URL` fallback in `apps/api/src/index.ts` and `apps/api/src/services/search.ts` (unused while nothing is deployed), in the dashboard API-keys example (`ApiKeysClient.tsx`), as `security@cap-protocol.org` in README and SECURITY.md, and in the live site's metadata: `apps/site/app/layout.tsx` (`metadataBase`, OpenGraph URL), `robots.ts` and `sitemap.ts` point canonical URLs at a domain that currently serves someone else's site. Replace these with the Vercel hostname or the confirmed domain in a small follow-up PR.
 - `openai` 4.104 → 7.x is a separate major bump (zod helpers are not used, so nothing breaks today).
 - Branch protection: after this merge, enable "Require a pull request before merging" (0 approvals) and `enforce_admins` so direct pushes to `main` stop.
 
@@ -48,5 +48,5 @@ Run in the real working copy against Docker `cap_postgres` (pgvector 16) and `ca
 2. Delete merged branches (`chore/p0-hardening`, `chore/p2-reliability`, `chore/p4-platform`, `chore/deps-2026-10-08`, `docs/handoff-after-merge`, `feat/remote-mcp`, `feat/shared-commerce-services`); Dependabot PRs #31, #48, #49 are superseded by this PR.
 3. First real Shopify install: create a Partners app + development store, run OAuth → sync locally through ngrok, compare `/v1/search` with the store's own `https://{store}/api/ucp/mcp`. This is the gap study that defines the readiness product.
 4. Agent Readiness Score v1: publish the weights of `computeGeoScore`, add per-attribute "why / how to fix" output, calibrate on 20–50 public catalogs via the Shopify Catalog API, then surface it in the dashboard and as a free URL-only audit (PDF).
-5. Retire checkout / remote-MCP / "neutral protocol" claims from the site copy; keep the code until replaced.
+5. Retire checkout / remote-MCP / "neutral protocol" claims from the site copy and fix the site metadata (`metadataBase`, sitemap, robots and the security contact currently use `cap-protocol.org`); keep the code until replaced.
 6. No Render or staging resources until a pilot merchant exists; explicit approval before any paid creation.

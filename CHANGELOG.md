@@ -63,7 +63,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Invitation acceptance no longer verifies passwords of existing accounts (it requires a session of the invited user instead) and is rate limited per IP and per invitation.
 - Owner sign-in after Shopify OAuth goes through a same-origin confirmation step, closing login CSRF.
 - Uninstalling the app revokes pending invitations and unused sign-in links.
-- Dependency updates clearing every `pnpm audit --prod` finding (3 critical, 9 high): Next.js 15.5.27, MCP SDK 1.32.1, Hono 4.13.13, and patched `sharp`, `fast-uri`, `proxy-addr`, `qs`, `ip-address`, `postcss`, `source-map-js` overrides.
+- Dependency updates clearing every `pnpm audit --prod` finding (3 critical, 9 high): Hono 4.13.13, `@modelcontextprotocol/sdk` 1.32.2, and patched `sharp`, `proxy-addr`, `qs`, `postcss`, `source-map-js` overrides. Next.js, `fast-uri` and `ip-address` are covered by the entries above.
 - Dashboard sends CSP `frame-ancestors 'none'`, HSTS (production), `nosniff`, referrer and permissions policies; the unused `/api/cap` proxy is removed.
 
 ### Protocol
@@ -75,7 +75,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `db:push` scripts: schema changes ship as migrations, and CI checks that `schema.prisma` matches them (`pnpm db:check-drift`).
 - Unsupported claims on the marketing site (signed transactions, multi-vendor federation, latency figures, adoption, fraud detection).
 
-## [0.1.0] — 2026-04-30
+## [0.1.0-alpha] — 2026-04-30
 
 First public alpha release of the Commerce Agent Protocol reference implementation.
 
@@ -117,4 +117,4 @@ Alpha. Breaking changes expected before `v1.0`. Catalog → search → checkout 
 
 [Unreleased]: https://github.com/teocomyn/commerce-agent-protocol/compare/v0.2.0-alpha...HEAD
 [0.2.0-alpha]: https://github.com/teocomyn/commerce-agent-protocol/compare/v0.1.0-alpha...v0.2.0-alpha
-[0.1.0]: https://github.com/teocomyn/commerce-agent-protocol/releases/tag/v0.1.0-alpha
+[0.1.0-alpha]: https://github.com/teocomyn/commerce-agent-protocol/releases/tag/v0.1.0-alpha

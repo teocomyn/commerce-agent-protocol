@@ -21,11 +21,11 @@
 
 ## Why CAP?
 
-Today, when an AI agent wants to buy something for a human, it scrapes HTML, guesses prices, and clicks "Add to cart" buttons that weren't designed for it. It's slow, brittle, and breaks every time a merchant redesigns their store. On the merchant side, getting an AI agent to actually finalize a transaction is impossible — there's no protocol, no standard, no shared language.
+Today, when an AI shopping agent reads a store, it gets what the storefront exposes: a title, a price, a few lines of description. Agents need thirty or more structured attributes to rank and recommend a product; most catalogs expose three to eight. The checkout rails now exist (Google and Shopify's UCP, Shopify Catalog, ChatGPT and Gemini shopping). The data they read is still poor.
 
-**CAP fixes that.** It's a neutral, open layer — not owned by Shopify, Google, or OpenAI — that lets a merchant expose an agent-readable catalog and lets agents search, compare and start a checkout through an authenticated API. The shopper still completes payment on the merchant's checkout. The spec and the reference implementation are free (Apache-2.0); Shopify is the only supported platform today.
+**CAP measures and fixes that.** It ingests a merchant's catalog, enriches each product into typed attributes, scores how ready it is for agents and exposes the result the way an agent reads it, so the merchant sees and fixes what the rails see. The reference implementation is free (Apache-2.0); Shopify is the only supported platform today.
 
-> Since v0.2 CAP no longer tries to be the checkout protocol: Shopify now ships a UCP MCP per store and Google, OpenAI and Stripe own the rails. CAP measures and fixes what those rails read. See [ADR-0001](./docs/ADR-0001-positioning-agent-readiness.md).
+> Until v0.2 CAP tried to be the checkout protocol between agents and merchants. Shopify now ships a UCP MCP per store and Google, OpenAI and Stripe own the rails, so CAP feeds them instead of competing with them. See [ADR-0001](./docs/ADR-0001-positioning-agent-readiness.md).
 
 ---
 
@@ -33,11 +33,11 @@ Today, when an AI agent wants to buy something for a human, it scrapes HTML, gue
 
 | Pillar | What it does |
 |--------|--------------|
-| **1. Agent-readable catalog format** | A versioned JSON schema for products, variants, stock, prices, certifications, shipping, returns — designed to be read by an LLM, not a human. |
-| **2. Transaction API** | `/v1/search` (semantic, vector), `/v1/compare` (matrix), `/v1/checkout/initiate` (Shopify Cart API). Authenticated by API keys, rate-limited per plan. |
-| **3. MCP server** | Stdio MCP server with `commerce_search`, `commerce_compare`, `commerce_checkout` tools, for local stdio MCP clients such as Claude Desktop and Cursor. The tools run the same code as the REST endpoints (same arguments, results and errors). Served over stdio for local clients and over Streamable HTTP at `/mcp` for remote ones (API key auth). |
+| **1. Catalog ingestion and structured enrichment** | Shopify OAuth, bulk sync and webhooks feed a raw catalog; GPT structured output turns each product into typed attributes (materials, dimensions, certifications from merchant metafields, shipping, returns) with vector embeddings. |
+| **2. Agent Readiness Score** | `computeGeoScore` rates each product and catalog on what shopping agents need to read, rank and transact it. Published weights, per-attribute fixes and calibration on real catalogs are the next milestone ([ADR-0001](./docs/ADR-0001-positioning-agent-readiness.md)). |
+| **3. Agent-facing read surface** | `/v1/search` (semantic, vector) and `/v1/compare` (matrix) over REST and MCP (`commerce_search`, `commerce_compare`, same code and errors on both), used to check how an agent sees the catalog. `/v1/checkout/initiate` and `commerce_checkout` stay for compatibility and are no longer the product promise. |
 
-This repository contains both the **spec** (open, versioned in [`cap-spec/`](./cap-spec)) and the **reference implementation** (this monorepo).
+This repository contains the reference implementation (this monorepo) and the original [`cap-spec/`](./cap-spec) JSON schema, kept as CAP's catalog format rather than as a standard for others to implement.
 
 ---
 
@@ -63,7 +63,7 @@ Diagrams: [`cap_system_architecture_overview.svg`](./cap_system_architecture_ove
 
 ## Quick start
 
-**Requirements:** Node ≥ 22.9, pnpm ≥ 9, Docker.
+**Requirements:** Node ≥ 22.12, pnpm ≥ 9, Docker.
 
 ```bash
 # 1. Local Postgres (with pgvector) + Redis
@@ -109,14 +109,14 @@ curl -X POST http://localhost:3000/v1/search \
 
 Send an `Idempotency-Key` header on `POST /v1/checkout/initiate`: a retried request with the same key and body returns the first outcome (checkout or error) instead of creating a second Shopify cart. Keys are never released; to try again after a failure, use a new key.
 
-**Connect a remote MCP client** (Streamable HTTP, any client that can send a custom header). The API key decides the merchant, as on the REST endpoints:
+**Connect a remote MCP client** (Streamable HTTP, any client that can send a custom header). The same tools are served at `/mcp` of a running API; the API key decides the merchant, as on the REST endpoints. Against the local API:
 
 ```bash
-claude mcp add --transport http cap https://api.cap-protocol.org/mcp \
+claude mcp add --transport http cap http://localhost:3000/mcp \
   --header "Authorization: Bearer cap_live_..."
 ```
 
-In Cursor's `mcp.json`: `{"mcpServers": {"cap": {"url": "https://api.cap-protocol.org/mcp", "headers": {"Authorization": "Bearer cap_live_..."}}}}`. Web connectors that require OAuth (for example Claude.ai custom connectors) are not supported yet.
+In Cursor's `mcp.json`: `{"mcpServers": {"cap": {"url": "http://localhost:3000/mcp", "headers": {"Authorization": "Bearer cap_live_..."}}}}`. Web connectors that require OAuth (for example Claude.ai custom connectors) are not supported, and no hosted endpoint exists today.
 
 **Run as a local MCP server** (stdio, for Claude Desktop / Cursor):
 
@@ -147,7 +147,7 @@ CAP is **alpha (v0.2.0-alpha, 2026-11-01)**. The ingestion, enrichment, scoring,
 
 See the [CHANGELOG](./CHANGELOG.md) for the full release history.
 
-Production runs the API, dashboard, catalog worker, and enrichment worker as separate services. See the [dashboard authentication guide](./docs/DASHBOARD_AUTH.md), [staging runbook](./docs/STAGING.md), [Shopify E2E runbook](./docs/SHOPIFY_E2E.md), [operations runbook](./docs/OPERATIONS.md), [production deployment runbook](./docs/PRODUCTION_DEPLOYMENT.md), [`render.staging.yaml`](./render.staging.yaml), and [`render.yaml`](./render.yaml).
+The deployable units are the API, the dashboard, the catalog worker and the enrichment worker, as separate services; none of them is deployed today (only this site is). See the [dashboard authentication guide](./docs/DASHBOARD_AUTH.md), [staging runbook](./docs/STAGING.md), [Shopify E2E runbook](./docs/SHOPIFY_E2E.md), [operations runbook](./docs/OPERATIONS.md), [production deployment runbook](./docs/PRODUCTION_DEPLOYMENT.md), [`render.staging.yaml`](./render.staging.yaml), and [`render.yaml`](./render.yaml).
 
 ---
 
