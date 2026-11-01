@@ -282,7 +282,7 @@ async function main() {
       label: 'demo-seed',
     },
   })
-  console.log(`  ✓ API key record: ${apiKeyRecord.id}`)
+  console.log('  ✓ Demo API key stored (hash only)')
 
   // ============================================================
   // 3. Products + embeddings
