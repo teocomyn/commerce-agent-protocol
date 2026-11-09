@@ -18,7 +18,7 @@
     "clsx": "^2.1.0",
     "ioredis": "^5.11.1",
     "lucide-react": "^0.577.0",
-    "next": "^15.5.28",
+    "next": "^15.5.29",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "zod": "^4.6.7"
@@ -30,7 +30,7 @@
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.6.2",
     "eslint": "^9",
-    "eslint-config-next": "^15.5.28",
+    "eslint-config-next": "^15.5.29",
     "postcss": "^8.5.32",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.5.0",
